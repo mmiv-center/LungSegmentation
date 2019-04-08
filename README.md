@@ -6,6 +6,7 @@ This program is using a series of labelling and morphological operations to extr
 
 ### Debug build
 
+Adjust the CMakeLists.txt file with the path for your itk version.
 ```
 cmake -DCMAKE_BUILD_TYPE=Debug .
 make

@@ -7,7 +7,7 @@ endif()
 set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-4.8.1/bin)
 SET(CMAKE_CXX_FLAGS "-std=c++0x")
 
-project(N4)
+project(LungSegmentation)
 
   FIND_PACKAGE(ITK)
     IF(ITK_FOUND)
