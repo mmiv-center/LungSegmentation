@@ -18,6 +18,18 @@
 #include "itkMinimumMaximumImageCalculator.h"
 #include "itkDiscreteGaussianImageFilter.h"
 #include "itkLabelImageToShapeLabelMapFilter.h"
+#include "itkHessianRecursiveGaussianImageFilter.h"
+#include "itkSymmetricSecondRankTensor.h"
+#include "itkSymmetricEigenAnalysisImageFilter.h"
+#include "itkImageAdaptor.h"
+//#include <itkPixelAccessor.h>
+#include "itkImageRegionIterator.h"
+#include "itkImageRegionConstIterator.h"
+
+#include "itkResampleImageFilter.h"
+#include "itkBSplineInterpolateImageFunction.h"
+#include "itkWindowedSincInterpolateImageFunction.h"
+#include "itkExtractImageFilter.h"
 
 
 
@@ -26,8 +38,11 @@
 #include "gdcmUIDGenerator.h"
 #include "itkMetaDataDictionary.h"
 
+#include "json.hpp"
 #include "metaCommand.h"
 #include <map>
+
+using json = nlohmann::json;
 
 // forward declaration
 void CopyDictionary (itk::MetaDataDictionary &fromDict, itk::MetaDataDictionary &toDict);
@@ -122,9 +137,12 @@ std::vector<TValue> ConvertVector( std::string optionString )
   return values;
 }
 
+json resultJSON;
 
 int main( int argc, char* argv[] ) {
   
+  itk::MultiThreader::SetGlobalMaximumNumberOfThreads( 4 );
+
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
   command.SetDescription("LungSegmentation on CT DICOM images. Read DICOM image series and perform a lung segmentation. Exports a new DICOM series.");
@@ -140,10 +158,10 @@ int main( int argc, char* argv[] ) {
   command.SetOption("SeriesName", "n", false, "Select series by series name (if more than one series is present).");
   command.AddOptionField("SeriesName", "seriesname", MetaCommand::STRING, false);
   
-  command.SetOption("SaveBiasfield", "b", false, "Save the biasfield as a nifty file in the current directory");
-  command.AddOptionField("SaveBiasfield", "biasfieldfilename", MetaCommand::STRING,true);
+  command.SetOption("SaveLabelfield", "b", false, "Save the label field as a nifty file in the current directory");
+  command.AddOptionField("SaveLabelfield", "labelfieldfilename", MetaCommand::STRING,true);
 
-  command.SetOption("SaveNifty", "n", false, "Save the corrected dataset as a nifty image to the current directory");
+  command.SetOption("SaveNifty", "u", false, "Save the corrected dataset as a nifty image to the current directory");
   command.AddOptionField("SaveNifty", "niftyfilename", MetaCommand::STRING, true);
 
   command.SetOption("Verbose", "v", false, "Print more verbose output");
@@ -160,25 +178,41 @@ int main( int argc, char* argv[] ) {
   if (command.GetOptionWasSet("Verbose"))
      verbose = true;
 
-  bool saveBiasField = false;  
+  bool saveLabelField = false;  
   bool saveNifty = false;
   bool seriesIdentifierFlag = false;
 
-  if ( command.GetOptionWasSet("SaveBiasfield") )
-    saveBiasField = true;
-  if ( command.GetOptionWasSet("SaveNifty") )
+  if ( command.GetOptionWasSet("SaveLabelfield") )
+    saveLabelField = true;
+  if ( command.GetOptionWasSet("SaveNifty") ) {
     saveNifty = true;
+    fprintf(stdout, "will save nifty\n");
+  }
   if ( command.GetOptionWasSet("SeriesName") )
     seriesIdentifierFlag = true;
-  std::string biasfieldfilename = command.GetValueAsString("SaveBiasfield", "biasfieldfilename");
+  std::string labelfieldfilename = command.GetValueAsString("SaveLabelfield", "labelfieldfilename");
   std::string niftyfilename = command.GetValueAsString("SaveNifty", "niftyfilename");
+  std::string niftyfilename2 = niftyfilename + "_walls.nii";
+  size_t lastdot = niftyfilename.find_last_of(".");
+  if (lastdot == std::string::npos) 
+    niftyfilename2 = niftyfilename + "_walls.nii";
+  else
+    niftyfilename2 = niftyfilename.substr(0, lastdot) + "_walls.nii"; 
+
   std::string seriesName    = command.GetValueAsString("SeriesName", "seriesname");
-  
-  
-  typedef signed short    PixelType;
+
+  // store information in the result json file
+  resultJSON["command_line"] = json::array();
+  for (int i = 0; i < argc; i++)
+  {
+    resultJSON["command_line"].push_back(std::string(argv[i]));
+  }
+  typedef signed short PixelType;
+  typedef float           FloatPixelType;
   const unsigned int      Dimension = 3;
   
   typedef itk::Image< PixelType, Dimension >         ImageType;
+  typedef itk::Image< FloatPixelType, Dimension >    FloatImageType;
   
   typedef itk::ImageSeriesReader< ImageType >        ReaderType;
   ReaderType::Pointer reader = ReaderType::New();
@@ -268,7 +302,7 @@ int main( int argc, char* argv[] ) {
             fprintf(stdout, "Skip this series %s, output directory exists already...\n", outputSeries.c_str());
             exit(0);
         }
-      
+
         typedef std::vector< std::string >   FileNamesContainer;
         FileNamesContainer fileNames;
       
@@ -279,7 +313,10 @@ int main( int argc, char* argv[] ) {
           continue;
         }
         fprintf(stdout, "sufficient number of images [%lu] in this series, start processing...\n", fileNames.size());
-
+        resultJSON["series_identifier"] = seriesIdentifier;
+        //for (int i = 0; i < fileNames.size(); i++) {
+        //  resultJSON["file_names"].push_back(fileNames[i]);
+        //}
 
         // here we read in all the slices as a single volume for processing
         // if we want to write them back out we have to read them slice by
@@ -297,7 +334,7 @@ int main( int argc, char* argv[] ) {
         ImageType::Pointer inputImage = reader->GetOutput();
         typedef itk::MetaDataDictionary   DictionaryType;
         DictionaryType & dictionary = inputImage->GetMetaDataDictionary();
-
+        fprintf(stdout, "pixel spacing of input is: %f %f %f\n", inputImage->GetSpacing()[0], inputImage->GetSpacing()[1], inputImage->GetSpacing()[2]);
         // overwrite a value in the dicom dictionary
         //std::string entryId( "0010|0010" );
         //std::string value( "MYNAME" );
@@ -340,6 +377,7 @@ int main( int argc, char* argv[] ) {
            thresh->Update();
            maskImage = thresh->GetOutput();
            maskImage->DisconnectPipeline();
+           fprintf(stdout, "pixel spacing of mask image is: %f %f %f\n", maskImage->GetSpacing()[0], maskImage->GetSpacing()[1], maskImage->GetSpacing()[2]);
         }
 
         //
@@ -421,6 +459,8 @@ int main( int argc, char* argv[] ) {
   
         mask->SetRegions(maskRegion);
         mask->Allocate();
+        mask->SetOrigin(inputImage->GetOrigin());
+        mask->SetSpacing(inputImage->GetSpacing());
         MaskImageType::SizeType regionSize = maskRegion.GetSize();
         itk::ImageRegionIterator<MaskImageType> maskIterator(mask,maskRegion);
         itk::ImageRegionIterator<MaskImageType> inputMask1Iterator(mask1,mask1Region);
@@ -438,6 +478,7 @@ int main( int argc, char* argv[] ) {
           ++inputMask1Iterator;
           ++inputMask2Iterator;
         }
+        fprintf(stdout, "pixel spacing of grow/shrunk image is: %f %f %f\n", mask->GetSpacing()[0], mask->GetSpacing()[1], mask->GetSpacing()[2]);
 
         // now in mask we have every air filled cavety inside the body, look for the largest one, assume its the lungs
         ConnectedComponentImageFilterType::Pointer connected2 = ConnectedComponentImageFilterType::New ();
@@ -468,7 +509,7 @@ int main( int argc, char* argv[] ) {
 
         for (unsigned int n = 0; n < labelMap->GetNumberOfLabelObjects(); ++n) {
           ShapeLabelObjectType *labelObject = labelMap->GetNthLabelObject(n);
-          fprintf(stdout, "object %d has %0.4f liters, %d voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+          fprintf(stdout, "object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
           
           if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number of pixel
             useNObjects++;
@@ -526,10 +567,20 @@ int main( int argc, char* argv[] ) {
         itk::ImageRegionIterator<ImageType>     imIterator(inputImage,imRegion);
         itk::ImageRegionIterator<ImageType>     maskIterator2(final,maskRegion2);
 
+        MaskImageType::Pointer labelField = MaskImageType::New();
+        MaskImageType::RegionType labelFieldRegion  = inputImage->GetLargestPossibleRegion();
+        labelField->SetRegions(labelFieldRegion);
+        labelField->Allocate();
+        labelField->SetOrigin(inputImage->GetOrigin());
+        labelField->SetSpacing(inputImage->GetSpacing());
+        itk::ImageRegionIterator<MaskImageType> labelFieldIterator(labelField, labelFieldRegion);
+
         // as the background voxel we can use the first voxel overall
         int firstVoxel;
         bool gotFirstVoxel = false;
-        while (!imIterator.IsAtEnd() && !maskIterator2.IsAtEnd())  {
+        size_t numberOfPixel = 0;
+        while (!imIterator.IsAtEnd() && !maskIterator2.IsAtEnd())
+        {
           if (!gotFirstVoxel) {
             gotFirstVoxel = true;
             firstVoxel = imIterator.Get();
@@ -538,65 +589,633 @@ int main( int argc, char* argv[] ) {
           if (maskIterator2.Get() != 0) {
           // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0]) / 2) {
               maskIterator2.Set( imIterator.Get() );
-          } else {
-              maskIterator2.Set( firstVoxel ); // this depends on the pixel representation its ok
+              labelFieldIterator.Set(1);
+              numberOfPixel++;
+          }
+          else
+          {
+            maskIterator2.Set(firstVoxel); // this depends on the pixel representation its ok
+            labelFieldIterator.Set(0);
           }
           ++maskIterator2;
           ++imIterator;
+          ++labelFieldIterator;
         }
+        resultJSON["lung_number_of_voxel"] = numberOfPixel;
+        // calculate the volume of the lungs
+        double spacingx = inputImage->GetSpacing()[0];
+        double spacingy = inputImage->GetSpacing()[1];
+        double spacingz = inputImage->GetSpacing()[2];
+        double originx  = inputImage->GetOrigin()[0];
+        double originy  = inputImage->GetOrigin()[1];
+        double originz  = inputImage->GetOrigin()[2];
+        resultJSON["voxel_size"] = json::array();
+        resultJSON["voxel_size"].push_back(spacingx);
+        resultJSON["voxel_size"].push_back(spacingy);
+        resultJSON["voxel_size"].push_back(spacingz);
 
-        typedef itk::Image< ImageType, 3 > OutputImageType;
-        typedef itk::CastImageFilter< 
-                        ImageType,
-                        ImageType > CastFilterType;
-        CastFilterType::Pointer  caster =  CastFilterType::New();
-        caster->SetInput( final );
-        //caster->SetInput( maskImage );
-        //caster->SetInput( binaryErode4->GetOutput() );
-        //caster->SetInput( sliceFilter->GetOutput() );
-        // caster->SetInput( labelShapeKeepNObjectsImageFilter->GetOutput() ); // body mask
-        //caster->SetInput( mask1 );
-        //caster->SetInput( mask2 );
-        caster->Update();
+        // in liters
+        resultJSON["lung_volume"] = numberOfPixel * spacingx * spacingy * spacingz * 1e-6;
 
-        std::cout  << "Processing done" << std::endl;
-
-        if (saveNifty) {
-           typedef itk::ImageFileWriter< ImageType > WriterType;
-           WriterType::Pointer writer = WriterType::New();      
-           writer->SetFileName( niftyfilename );
-           writer->SetInput( caster->GetOutput() );
-     
-           //////////////////////////////////////////////  
- 
-           /* typedef itk::SmoothingRecursiveGaussianImageFilter< ImageType, ImageType >  FilterType;
-      
-           FilterType::Pointer filter = FilterType::New();
-      
-           filter->SetInput( reader->GetOutput() );
-      
-           const double sigma = atof( argv[3] );
-           filter->SetSigma( sigma );
-
-      
-           typedef itk::ImageFileWriter< ImageType > WriterType;
+        // save the label field (one lung)
+        if (saveLabelField) {
+           typedef itk::ImageFileWriter< MaskImageType > WriterType;
            WriterType::Pointer writer = WriterType::New();
+           writer->SetFileName( labelfieldfilename );
+           writer->SetInput( labelField );
       
-           writer->SetFileName( argv[2] );
-           writer->SetInput( filter->GetOutput() );
-           //writer->SetImageIO( dicomIO ); */
-      
-           std::cout  << "Writing the image as " << std::endl << std::endl;
-           std::cout  << argv[2] << std::endl << std::endl;      
-      
-           try  {
+           std::cout  << "Writing the label field as " << std::endl;
+           std::cout  << labelfieldfilename << std::endl << std::endl;
+           resultJSON["label_field_filename"] = std::string(labelfieldfilename);
+           fprintf(stdout, "label field voxel size is: %f %f %f\n", labelField->GetSpacing()[0], labelField->GetSpacing()[1], labelField->GetSpacing()[2]);
+           //std::string res2 = resultJSON.dump(4) + "\n";
+           //fprintf(stdout, "%s", res2.c_str());
+
+           try
+           {
              writer->Update();
            } catch (itk::ExceptionObject &ex) {
              std::cout << ex << std::endl;
              return EXIT_FAILURE;
            }
         }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////
+        // we should now split the lungs into the airways and the lungs using region growing
+        // for this we need to find out if we have a label in the top image... we should have 3
+        // regions of interest if we start from the top, we should set a seed point into the middle
+        // one
+        using ExtractFilterType = itk::ExtractImageFilter< MaskImageType, MaskImageType >;
+        ExtractFilterType::Pointer extractFilter = ExtractFilterType::New();
+        extractFilter->SetDirectionCollapseToSubmatrix();
+        const MaskImageType * inImage = labelField;
+        ImageType::RegionType inputRegion = inImage->GetLargestPossibleRegion();
+         // GetBufferedRegion();
+        ImageType::SizeType size = inputRegion.GetSize();
+        unsigned int lastSlice = size[2];
+        unsigned int sliceNumber = size[2] - 1;
+        int minRegion = 0;
+        float minSeedx = 0;
+        float minSeedy = 0;
+        int minSeedIdx = 0;
+        int minSeedIdy = 0;
+        int minDist = 0;
+        int sliceSeedStart = 0;
+        int minNumObjects = 0;
+        for (; sliceNumber >= 0; sliceNumber--)
+        {
+          size[2] = 1; // we extract along z direction
+          ImageType::IndexType start = inputRegion.GetIndex();
+          start[2] = sliceNumber;
+          ImageType::RegionType desiredRegion;
+          desiredRegion.SetSize(  size  );
+          desiredRegion.SetIndex( start );
+          extractFilter->SetExtractionRegion( desiredRegion );
+          extractFilter->SetInput( inImage );
+
+          // Now we can run connected components on the 2D image of the first slice
+          // we expect 3 distinct regions
+          ConnectedComponentImageFilterType::Pointer connected3 = ConnectedComponentImageFilterType::New ();
+          connected3->SetInput( extractFilter->GetOutput() );
+          connected3->Update();
+
+          //using LabelType = unsigned short;        
+          //using ShapeLabelObjectType = itk::ShapeLabelObject< LabelType, 3 >;
+          //using LabelMapType = itk::LabelMap< ShapeLabelObjectType >;
+          //using labelType = itk::LabelImageToShapeLabelMapFilter< ImageType, LabelMapType>;
+          labelType::Pointer labelTmp = labelType::New();
+          labelTmp->SetInput( connected3->GetOutput() );
+          labelTmp->SetComputePerimeter(true);
+          labelTmp->Update();
+
+          //int useNObjects = 0;
+          LabelMapType *labelMapTmp = labelTmp->GetOutput();
+          if (labelMapTmp->GetNumberOfLabelObjects() == 0) {
+            // error case
+            fprintf(stderr, "Look at slice %d, Could not find any object in the data using the current set of thresholds, we can try to start again by lowering the threshold?\n", sliceNumber);
+          }
+
+          for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); ++n) {
+            ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
+            fprintf(stdout, "top slice: object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+            
+            //if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number of pixel
+            //  useNObjects++;
+          }
+          // it might be better to be able to stop early, there are some series with only a single lung 
+          // for those we have to stop at 2. What we could do is stop as well if we are too far down in the image stack
+          if (labelMapTmp->GetNumberOfLabelObjects() == 3 || sliceNumber < 2*lastSlice/3) {
+            sliceSeedStart = sliceNumber;
+            fprintf(stdout, "found %lu objects in slice %d of %d\n", labelMapTmp->GetNumberOfLabelObjects(), sliceNumber + 1, lastSlice);
+            // seed point would be in the object that is closest to the center of mass in the image
+            // we could go to the last slice that has 3 objects as well... 
+            // what if we have only one lung? We should detect the diameter of the airways instead.. something like at least two objects
+          
+            // which one is closest to the center (center of mass)
+            for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); n++)
+            {
+              ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
+              double x = labelObject->GetCentroid()[0];
+              double y = labelObject->GetCentroid()[1];
+              //fprintf(stdout, "location of object in pixel %d is %f x %f\n", n, x, y);
+              MaskImageType::RegionType bb = inputRegion;
+              double spacingx = inputImage->GetSpacing()[0];
+              double spacingy = inputImage->GetSpacing()[1];
+              double spacingz = inputImage->GetSpacing()[2];
+              double originx = inputImage->GetOrigin()[0];
+              double originy = inputImage->GetOrigin()[1];
+              double originz = inputImage->GetOrigin()[2];
+              x = x;
+               // originx + x *(spacingx);
+              y = y;
+               // originy + y *(spacingy);
+              fprintf(stdout, "location of object in patient space %d is %f x %f\n", n, x, y);
+
+              double COMx = originx + (spacingx) * ((size[0]-1) / 2.0);
+              double COMy = originy + (spacingy) * ((size[1]-1) / 2.0);
+              int seedx = roundf((x - originx) / spacingx);
+              int seedy = roundf((y - originy) / spacingy);
+
+              fprintf(stdout, "%lu %lu %lu, %f %f %f, %f %f %f, center %f %f\n", size[0], size[1], size[2], 
+                      originx, originy, originz, 
+                      spacingx, spacingy, spacingz, 
+                      COMx, COMy);
+
+              double dist = sqrtf((COMx - x) * (COMx - x) + (COMy - y) * (COMy - y));
+              if (n == 0 || dist < minDist) {
+                minDist = dist;
+                minRegion = n;
+                minSeedx = seedx;
+                minSeedy = seedy;
+                minNumObjects = labelMapTmp->GetNumberOfLabelObjects();
+              }
+              fprintf(stdout, "object %d is %f far away from center, centroid is at: %d %d\n", n, dist, seedx, seedy);
+
+              // inputRegion
+            }
+            break;
+          }
+        }
+        fprintf(stdout, "min object is: %d, seed is at %f %f slice %d\n", 
+                minRegion, minSeedx, minSeedy, sliceSeedStart);
+        resultJSON["trachea_slice_location_pixel"] = json::array();
+        resultJSON["trachea_slice_location_pixel"].push_back(minSeedx);
+        resultJSON["trachea_slice_location_pixel"].push_back(minSeedy);
+        resultJSON["trachea_slice_location_pixel"].push_back(sliceSeedStart);
+        resultJSON["trachea_slice_number_objects"] = minNumObjects;
+        resultJSON["trachea_slice_min_region"] = minRegion;
+        resultJSON["trachea_slice_min_distance"] = minDist;
+        
+        // before we try to separate the two lungs we should shrink our label again,
+        // that should help in cases where the trachea touch the lung wall
+        // if we do this we also have to grow the region again before we do an assignment to tissue type
+
+
+        ///////////////////////////////////////////////////////////////////////////////
+        // ok now do a region growing in labelField starting at minSeedx maxSeedy for all voxel that have the value 1
+        // we should have a second label field here
+        // how do we find neighbors?
+        MaskImageType::Pointer regionGrowingField = MaskImageType::New();
+        MaskImageType::RegionType regionGrowingFieldRegion  = inputImage->GetLargestPossibleRegion();
+        regionGrowingField->SetRegions(regionGrowingFieldRegion);
+        regionGrowingField->Allocate();
+        regionGrowingField->SetOrigin(inputImage->GetOrigin());
+        regionGrowingField->SetSpacing(inputImage->GetSpacing());
+        // itk::ImageRegionIterator<MaskImageType> regionGrowingFieldIterator(regionGrowingField, regionGrowingFieldRegion);
+        // how to we find neighboring voxel from current location minSeedx and minSeedy and sliceSeedStart?
+        using PointType = itk::Point< int, MaskImageType::ImageDimension >;
+        std::vector<PointType> front;
+        PointType p1;
+        p1[0] = minSeedx;
+        p1[1] = minSeedy;
+        p1[2] = sliceSeedStart;
+        front.push_back(p1);
+        // we should have a 1 at this place
+        ImageType::IndexType pixelIndex = {{p1[0],p1[1],p1[2]}};
+        regionGrowingField->SetPixel(pixelIndex, 1);
+        unsigned int count = 0;
+        unsigned int frontSize = 0;
+        size = regionGrowingFieldRegion.GetSize();
+        fprintf(stdout, "size of output: %lu %lu %lu\n", size[0], size[1], size[2]);
+        while (1)
+        {
+          if (front.size() == 0)
+            break;
+
+          count++;
+          //fprintf(stdout, "frontSize is %d\n", front.size());
+          // how do we check the first value from front in labelField? We want to know if the value is 0
+          PointType p;
+          p[0] = front[0][0];
+          p[1] = front[0][1];
+          p[2] = front[0][2];
+          front.erase(front.begin());
+          //pixelIndex = {{p[0], p[1], p[2]}};
+          //fprintf(stdout, "read pixel value at location %d %d %d as : %d\n", p[0], p[1], p[2], inImage->GetPixel(pixelIndex));
+
+          // get the 6 neighbors
+          PointType pp1;
+          pp1[0] = p[0]+1;
+          pp1[1] = p[1];
+          pp1[2] = p[2];
+          // inside boundaries?
+          if (pp1[0] < size[0]) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp1[0], pp1[1], pp1[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0)
+            {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp1);
+            }
+          }
+
+          PointType pp2;
+          pp2[0] = p[0]-1;
+          pp2[1] = p[1];
+          pp2[2] = p[2];
+          // inside boundaries?
+          if (pp2[0] >= 0) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp2[0], pp2[1], pp2[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0) {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp2);
+            }
+          }
+
+          PointType pp3;
+          pp3[0] = p[0];
+          pp3[1] = p[1]+1;
+          pp3[2] = p[2];
+          // inside boundaries?
+          if (pp3[1] < size[1]) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp3[0], pp3[1], pp3[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0) {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp3);
+            }
+          }
+
+          PointType pp4;
+          pp4[0] = p[0];
+          pp4[1] = p[1]-1;
+          pp4[2] = p[2];
+          // inside boundaries?
+          if (pp4[1] >= 0) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp4[0], pp4[1], pp4[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0) {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp4);
+            }
+          }
+
+          PointType pp5;
+          pp5[0] = p[0];
+          pp5[1] = p[1];
+          pp5[2] = p[2]+1;
+          // inside boundaries?
+          if (pp5[2] < size[2]) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp5[0], pp5[1], pp5[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0) {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp5);
+            }
+          }
+
+          PointType pp6;
+          pp6[0] = p[0];
+          pp6[1] = p[1];
+          pp6[2] = p[2]-1;
+          // inside boundaries?
+          if (pp6[2] >= 0) {
+            // are we still in the region of interest?
+            pixelIndex = {{pp6[0], pp6[1], pp6[2]}};
+            if (inImage->GetPixel(pixelIndex) == 1 && regionGrowingField->GetPixel(pixelIndex) == 0) {
+              // add to front as a new pixel
+              regionGrowingField->SetPixel(pixelIndex, 1);
+              front.push_back(pp6);
+            }
+          }
+          // how long is the list in front? This burn in phase might not be required,
+          // if we can add all pixel of the initial trachea into the region of interest
+          if (count == 1000) {
+            frontSize = front.size();
+            fprintf(stdout, "frontSize after 1000 is %d\n", frontSize);
+          }
+          if (count > 1000) {
+            fprintf(stdout, "iteration on frontSize: %lu\n", front.size());
+            if (front.size() > frontSize * 2)
+            {
+              // found the last entry
+              fprintf(stdout, "stop at count == %d\n", count);
+              resultJSON["trachea_stop_voxel_count"] = count;
+              resultJSON["trachea_stop_voxel_front_size"] = front.size();
+              break; // don't continue with region growing, show the output
+            }
+          }
+        }
+        // can we save the air ways right now?
+        if (saveLabelField) {
+          typedef itk::ImageFileWriter< MaskImageType > WriterType;
+          WriterType::Pointer writer = WriterType::New();
+          std::string a;
+          size_t lastdot = labelfieldfilename.find_last_of(".");
+          if (lastdot == std::string::npos) 
+            a = labelfieldfilename + "_trachea.nii";
+          else
+            a = labelfieldfilename.substr(0, lastdot) + "_trachea.nii";
+
+          // std::string a(labelfieldfilename + "trachea.nii");
+          writer->SetFileName(a);
+          writer->SetInput( regionGrowingField );
       
+          std::cout  << "Writing the trachea field as " << std::endl;
+          std::cout  << a << std::endl << std::endl;
+          resultJSON["trachea_filename"] = a;
+
+          try  {
+            writer->Update();
+          } catch (itk::ExceptionObject &ex) {
+            std::cout << ex << std::endl;
+            return EXIT_FAILURE;
+          }
+        }
+
+        // after separating the airways out we should check again if we have two large regions of interest left
+        // those would be left and right lung respectively. Each one should get its own label.
+        // new Mask for the lung (not in trachea)
+        MaskImageType::Pointer no_trachea = MaskImageType::New();
+        MaskImageType::RegionType no_tracheaRegion  = inputImage->GetLargestPossibleRegion();
+        no_trachea->SetRegions(no_tracheaRegion);
+        no_trachea->Allocate();
+        no_trachea->SetOrigin(inputImage->GetOrigin());
+        no_trachea->SetSpacing(inputImage->GetSpacing());
+        itk::ImageRegionIterator<MaskImageType> no_tracheaIterator(no_trachea, no_tracheaRegion);
+        itk::ImageRegionIterator<MaskImageType> tracheaIterator(regionGrowingField,no_tracheaRegion);
+        itk::ImageRegionIterator<MaskImageType> lungMaskIterator(labelField,no_tracheaRegion);
+        while (!lungMaskIterator.IsAtEnd() && !tracheaIterator.IsAtEnd() && !no_tracheaIterator.IsAtEnd())  {
+          if (lungMaskIterator.Get() > 0 && tracheaIterator.Get() != 1) {
+            no_tracheaIterator.Set(1);
+          } else {
+            no_tracheaIterator.Set(0);
+          }
+          ++lungMaskIterator;
+          ++tracheaIterator;
+          ++no_tracheaIterator;
+        }
+        // can we save the lungs without trachea now?
+        if (saveLabelField) {
+          typedef itk::ImageFileWriter< MaskImageType > WriterType;
+          WriterType::Pointer writer = WriterType::New();
+          std::string a;
+          size_t lastdot = labelfieldfilename.find_last_of(".");
+          if (lastdot == std::string::npos) 
+            a = labelfieldfilename + "_lung_no_trachea.nii";
+          else
+            a = labelfieldfilename.substr(0, lastdot) + "_lung_no_trachea.nii";
+
+          // std::string a(labelfieldfilename + "trachea.nii");
+          writer->SetFileName(a);
+          writer->SetInput( no_trachea );
+      
+          std::cout  << "Writing the no trachea lung mask as " << std::endl;
+          std::cout  << a << std::endl << std::endl;
+          resultJSON["no_trachea_lung_mask_filename"] = a;
+
+          try  {
+            writer->Update();
+          } catch (itk::ExceptionObject &ex) {
+            std::cout << ex << std::endl;
+            return EXIT_FAILURE;
+          }
+        }
+
+
+
+        if (0) {
+          // we should make the volume isotropic first, before we do the hessian
+          typedef itk::ResampleImageFilter< ImageType, ImageType >  ResampleFilterType;
+          ResampleFilterType::Pointer resampler = ResampleFilterType::New();
+          typedef itk::IdentityTransform< double, Dimension >  TransformType;
+
+          TransformType::Pointer transform = TransformType::New();
+          transform->SetIdentity();
+          resampler->SetTransform( transform );
+
+          typedef itk::WindowedSincInterpolateImageFunction< ImageType, 3 >  WindowedSincInterpolatorType;
+          WindowedSincInterpolatorType::Pointer windowedSincInterpolator = WindowedSincInterpolatorType::New();
+          resampler->SetInterpolator( windowedSincInterpolator );
+
+          resampler->SetDefaultPixelValue( -1024 ); // Hounsfield Units for Air
+
+          const ImageType::SpacingType & inputSpacing = inputImage->GetSpacing();
+
+          double minSpacing = itk::NumericTraits< double >::max();
+          for (int i = 0; i < 3; i++) {
+            minSpacing = (minSpacing > inputSpacing[i] ? inputSpacing[i] : minSpacing);
+          }
+          
+          ImageType::SpacingType outputSpacing;
+          outputSpacing[0] = minSpacing;
+          outputSpacing[1] = minSpacing;
+          outputSpacing[2] = minSpacing;
+
+          resampler->SetOutputSpacing( outputSpacing );
+
+          resampler->SetOutputOrigin( inputImage->GetOrigin() );
+          resampler->SetOutputDirection( inputImage->GetDirection() );
+
+          ImageType::SizeType   inputSize = inputImage->GetLargestPossibleRegion().GetSize();
+          
+          typedef ImageType::SizeType::SizeValueType SizeValueType;
+
+          const double dx = inputSize[0] * inputSpacing[0] / outputSpacing[0];
+          const double dy = inputSize[1] * inputSpacing[1] / outputSpacing[1];
+          const double dz = inputSize[2] * inputSpacing[2] / outputSpacing[2];
+
+          ImageType::SizeType   finalSize;
+
+          finalSize[0] = static_cast<SizeValueType>( dx );
+          finalSize[1] = static_cast<SizeValueType>( dy );
+          finalSize[2] = static_cast<SizeValueType>( dz );
+
+          fprintf(stdout, "finalSize of output is: %lu %lu %lu\n", finalSize[0], finalSize[1], finalSize[2]);
+          resampler->SetSize( finalSize );
+          resampler->SetInput( inputImage );
+
+
+          // Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
+          using HessianFilterType = itk::HessianRecursiveGaussianImageFilter<ImageType>;
+          HessianFilterType::Pointer hessianFilter = HessianFilterType::New();
+          hessianFilter->SetInput( resampler->GetOutput() );
+          hessianFilter->SetSigma( static_cast< double >( 1.0f ) );
+          // now we need to get the three eigenvalues of the hessian to create our filter
+          typedef  itk::FixedArray< double, 3 > EigenValueArrayType;
+          typedef  itk::Image< EigenValueArrayType, 3 > EigenValueImageType;
+
+          typedef  itk::SymmetricEigenAnalysisImageFilter< HessianFilterType::OutputImageType, EigenValueImageType > EigenAnalysisFilterType;
+          typename EigenAnalysisFilterType::Pointer m_SymmetricEigenValueFilter;
+
+          m_SymmetricEigenValueFilter = EigenAnalysisFilterType::New();
+          m_SymmetricEigenValueFilter->SetDimension( 3 );
+          m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByValue );
+          // sorting by value sorts from lowest (most negative to highest eigenvalue 01 < 02 < 03)
+
+          //m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByMagnitude );
+
+          m_SymmetricEigenValueFilter->SetInput( hessianFilter->GetOutput() );
+          m_SymmetricEigenValueFilter->Update();
+
+          typedef typename EigenAnalysisFilterType::OutputImageType EigenValueOutputImageType;
+          const typename EigenValueOutputImageType::ConstPointer eigenImage = m_SymmetricEigenValueFilter->GetOutput();
+
+          EigenValueArrayType eigenValue;
+          itk::ImageRegionConstIterator<EigenValueOutputImageType> it;
+          it = itk::ImageRegionConstIterator<EigenValueOutputImageType>( eigenImage, eigenImage->GetLargestPossibleRegion());
+          
+          // create a new output image for the eigenvalue filter result
+          ImageType::Pointer vessels = ImageType::New();
+          ImageType::RegionType vesselRegion  = eigenImage->GetLargestPossibleRegion();
+          vessels->SetRegions(vesselRegion);
+          vessels->Allocate();
+          vessels->SetOrigin(inputImage->GetOrigin());
+          vessels->SetSpacing(inputImage->GetSpacing());
+          itk::ImageRegionIterator<ImageType> vesselIterator(vessels, vesselRegion);
+
+          ImageType::Pointer walls = ImageType::New();
+          ImageType::RegionType wallRegion  = eigenImage->GetLargestPossibleRegion();
+          walls->SetRegions(wallRegion);
+          walls->Allocate();
+          walls->SetOrigin(inputImage->GetOrigin());
+          walls->SetSpacing(inputImage->GetSpacing());
+          itk::ImageRegionIterator<ImageType> wallIterator(walls, wallRegion);
+
+          // calculate the maximum eigenvalue (absolute first)
+          double maxS = 0.0;
+          double a = 0.0;
+          it.GoToBegin();
+          while (!it.IsAtEnd()) {
+            // Get the eigen value
+            eigenValue = it.Get();
+            a = sqrt( (eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
+            if (a > maxS)
+              maxS = a;
+            ++it;
+          }
+          fprintf(stdout, "maxS : %f\n", maxS);
+          double ce = maxS/2.0;
+
+          it.GoToBegin();
+          vesselIterator.GoToBegin();
+          wallIterator.GoToBegin();
+          double wallMax = 0.0;
+          double wallMin = 0.0;
+          bool firstTime = true;
+          while (!it.IsAtEnd() && !vesselIterator.IsAtEnd()) {
+            // Get the eigen value
+            eigenValue = it.Get();
+            
+            // normalizeValue <= 0 for bright line structures
+            double e0 = eigenValue[0];
+            double e1 = eigenValue[1];
+            double e2 = eigenValue[2];
+            /*
+            Bright tubular structures will have low $\lambda_1$ and large negative values of $\lambda_2$ and $\lambda_3$.
+            Conversely dark tubular structures will have a low value of $\lambda_1$ and large positive values of $\lambda_2$ and $\lambda_3$.
+            Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
+            Dark plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large positive values of $\lambda_3$
+            Bright spherical (blob) like structures have all three eigen values as large negative numbers
+            Dark spherical (blob) like structures have all three eigen values as large positive numbers
+            */
+            //fprintf(stdout, "%f %f %f", e0, e1, e2);
+            double mag = sqrt( (eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]) );
+            // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by magnitude
+            double Rb = .5 * std::exp(-(1-0.7)) * std::fabs(eigenValue[0]);
+            double beta = 1;
+            double scale = 1;
+            vesselIterator.Set( scale * std::exp(-.5 * Rb * Rb / (beta * beta)) * (1 - std::exp(-.5 * mag * mag / (ce * ce)))  );
+
+            // wall like structures
+            double av = .5 * (eigenValue[1] + eigenValue[2]);
+            if (fabs(av) < 1e-6)
+              av = 1e-6;
+            double Rw = (-1.0 * eigenValue[0]) / av;
+            if (firstTime) {
+              firstTime = false;
+              wallMin = wallMax = Rw;
+            }
+            if (Rw < wallMin)
+              wallMin = Rw;
+            if (Rw > wallMax)
+              wallMax = Rw;
+
+            //Rw = 0.5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
+            //wallIterator.Set( scale * exp(-.5 * Rw * Rw / (beta * beta)) * (1 - exp(-.5 * mag * mag / (ce * ce))) + scale);
+            scale = 1;
+            wallIterator.Set( scale * Rw );
+
+            ++it;
+            ++vesselIterator;
+            ++wallIterator;
+          }
+          fprintf(stdout, "Wall min: %f and wall max is: %f\n", wallMin, wallMax);
+
+          typedef itk::Image< ImageType, 3 > OutputImageType;
+          typedef itk::CastImageFilter< 
+                          ImageType,
+                          ImageType > CastFilterType;
+          CastFilterType::Pointer  caster =  CastFilterType::New();
+          caster->SetInput( final );
+          //caster->SetInput( maskImage );
+          //caster->SetInput( binaryErode4->GetOutput() );
+          //caster->SetInput( sliceFilter->GetOutput() );
+          // caster->SetInput( labelShapeKeepNObjectsImageFilter->GetOutput() ); // body mask
+          //caster->SetInput( mask1 );
+          //caster->SetInput( mask2 );
+          caster->Update();
+
+          std::cout  << "Processing done" << std::endl;
+
+          if (saveNifty) {
+            typedef itk::ImageFileWriter< ImageType > WriterType;
+            WriterType::Pointer writer = WriterType::New();      
+            writer->SetFileName( niftyfilename );
+            writer->SetInput( vessels );
+        
+            std::cout  << "Writing the vessel image as " << std::endl << std::endl;
+            std::cout  << argv[2] << std::endl << std::endl;
+        
+            try  {
+              writer->Update();
+            } catch (itk::ExceptionObject &ex) {
+              std::cout << ex << std::endl;
+              return EXIT_FAILURE;
+            }
+
+            //typedef itk::ImageFileWriter< ImageType > WriterType;
+            WriterType::Pointer writer2 = WriterType::New();      
+            writer2->SetFileName( niftyfilename2 );
+            writer2->SetInput( walls );
+        
+            std::cout  << "Writing the wall image " << std::endl << std::endl;
+        
+            try  {
+              writer2->Update();
+            } catch (itk::ExceptionObject &ex) {
+              std::cout << ex << std::endl;
+              return EXIT_FAILURE;
+            }
+
+          }
+        }      
         // now save as DICOM
         gdcm::UIDGenerator suid;
         std::string newSeriesUID = suid.Generate();
@@ -609,7 +1228,8 @@ int main( int argc, char* argv[] ) {
         itksys::SystemTools::MakeDirectory( outputSeries );
         //fprintf(stdout, "save data to %s\n", output.c_str());
         std::cout  << "Writing output images to " << outputSeries << std::endl;
-      
+        resultJSON["output_series"] = std::string(outputSeries);
+        resultJSON["output_images"] = json::array();
         // now read in each input file in a loop, copy the result data over and write out as DICOM
         for (int i = 0; i < fileNames.size(); i++) {
            //std::cout << "use slice: " << fileNames[i] << " as template for output" << std::endl;
@@ -649,7 +1269,7 @@ int main( int argc, char* argv[] ) {
            unsigned int bla = sizeof(InputImageType::PixelType);
            InputImageType::PixelType* buffer2 = container->GetBufferPointer();
          
-           ImageType::Pointer nImage = caster->GetOutput();
+           ImageType::Pointer nImage = final;
            InputImageType::PixelContainer* container2;
            container2 = nImage->GetPixelContainer();
            InputImageType::PixelType* buffer3 = container2->GetBufferPointer();
@@ -719,8 +1339,8 @@ int main( int argc, char* argv[] ) {
            writer1->SetFileName( o.str() );
            writer1->SetImageIO( gdcmImageIO );
            writer1->Update();
-          //std::cout << "done with writing the image...";
-        
+           resultJSON["output_images"].push_back(o.str());
+           //std::cout << "done with writing the image...";
         }
       } // loop over series 
       
@@ -728,7 +1348,16 @@ int main( int argc, char* argv[] ) {
       std::cout << ex << std::endl;
       return EXIT_FAILURE;
   }
-    
+
+  std::string res = resultJSON.dump(4) + "\n";
+  std::ostringstream o;
+  o << output << "/" << resultJSON["series_identifier"] << ".json";
+  std::ofstream out(o.str());
+  out << res;
+  out.close();
+
+  fprintf(stdout, "%s", res.c_str());
+
   return EXIT_SUCCESS;
 }
 
