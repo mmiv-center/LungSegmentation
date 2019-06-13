@@ -17,6 +17,19 @@ project(LungSegmentation)
     ENDIF(ITK_FOUND)
 
 
-add_executable(LungSegmentation LungSegmentation.cxx )
-target_link_libraries(LungSegmentation  ${ITK_LIBRARIES})
+# Boost
+set(boost_min_ver 1.50.0)
+set(boost_libs system filesystem)
+find_package(Boost ${boost_min_ver})
 
+if(Boost_FOUND)
+    find_package(Boost ${boost_min_ver} COMPONENTS ${boost_libs})
+endif()
+
+#target_link_libraries(your_target ${Boost_LIBRARIES})
+
+add_executable(LungSegmentation LungSegmentation.cxx )
+target_link_libraries(LungSegmentation  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
+
+add_executable(MaskRegistration MaskRegistration.cxx )
+target_link_libraries(MaskRegistration  ${ITK_LIBRARIES})

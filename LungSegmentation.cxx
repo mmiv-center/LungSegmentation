@@ -31,8 +31,6 @@
 #include "itkWindowedSincInterpolateImageFunction.h"
 #include "itkExtractImageFilter.h"
 
-
-
 #include "itkShrinkImageFilter.h"
 #include "itkConstantPadImageFilter.h"
 #include "gdcmUIDGenerator.h"
@@ -41,8 +39,10 @@
 #include "json.hpp"
 #include "metaCommand.h"
 #include <map>
+#include <boost/filesystem.hpp>
 
 using json = nlohmann::json;
+using namespace boost::filesystem;
 
 // forward declaration
 void CopyDictionary (itk::MetaDataDictionary &fromDict, itk::MetaDataDictionary &toDict);
@@ -360,32 +360,32 @@ int main( int argc, char* argv[] ) {
           }
         }
 
-        if ( !maskImage ) {
+        if ( !maskImage ) { // segment tissue (body will be 1, air 0)
           typedef itk::DiscreteGaussianImageFilter<ImageType, ImageType >  gaussianFilterType;
           gaussianFilterType::Pointer gaussianFilter = gaussianFilterType::New();
           gaussianFilter->SetInput( inputImage );
           gaussianFilter->SetVariance(2.0f);
 
-           typedef itk::BinaryThresholdImageFilter<ImageType, MaskImageType> ThresholderType;
-           ThresholderType::Pointer thresh = ThresholderType::New();
-           thresh->SetInput( gaussianFilter->GetOutput() );
-           thresh->SetLowerThreshold( -20000 );
-           thresh->SetUpperThreshold( -200 );
-           thresh->SetOutsideValue( 1 );
-           thresh->SetInsideValue( 0 );
+          typedef itk::BinaryThresholdImageFilter<ImageType, MaskImageType> ThresholderType;
+          ThresholderType::Pointer thresh = ThresholderType::New();
+          thresh->SetInput( gaussianFilter->GetOutput() );
+          thresh->SetLowerThreshold( -20000 );
+          thresh->SetUpperThreshold( -600 ); // not too bright because otherwise the airways will connect with the lungs
+          thresh->SetOutsideValue( 1 ); // this marks our lungs as empty space and the body as 1!
+          thresh->SetInsideValue( 0 );
 
-           thresh->Update();
-           maskImage = thresh->GetOutput();
-           maskImage->DisconnectPipeline();
-           fprintf(stdout, "pixel spacing of mask image is: %f %f %f\n", maskImage->GetSpacing()[0], maskImage->GetSpacing()[1], maskImage->GetSpacing()[2]);
+          thresh->Update();
+          maskImage = thresh->GetOutput();
+          maskImage->DisconnectPipeline();
+          fprintf(stdout, "pixel spacing of mask image is: %f %f %f\n", maskImage->GetSpacing()[0], maskImage->GetSpacing()[1], maskImage->GetSpacing()[2]);
         }
 
         //
         // improve the mask for the body by hole filling and smoothing (grow + shrink)
         //
-        DilateFilterType::Pointer binaryDilate  = DilateFilterType::New();
+        DilateFilterType::Pointer binaryDilate  = DilateFilterType::New(); // grows inside the tissue
         DilateFilterType::Pointer binaryDilate2 = DilateFilterType::New();
-        ErodeFilterType::Pointer  binaryErode   = ErodeFilterType::New();
+        ErodeFilterType::Pointer  binaryErode   = ErodeFilterType::New(); // grows inside the lungs
         ErodeFilterType::Pointer  binaryErode2  = ErodeFilterType::New();
         ErodeFilterType::Pointer  binaryErode3  = ErodeFilterType::New();
         ErodeFilterType::Pointer  binaryErode4  = ErodeFilterType::New();
@@ -413,19 +413,42 @@ int main( int argc, char* argv[] ) {
         binaryErode2->SetErodeValue( 1 );
         binaryErode3->SetErodeValue( 1 );
         binaryErode4->SetErodeValue( 1 );
-        binaryDilate->Update();
-        binaryDilate2->Update();
-        binaryErode->Update();
+//        binaryDilate->Update();
+//        binaryDilate2->Update();
+//        binaryErode->Update();
         //binaryErode2->Update();
         //binaryErode3->Update();
-        binaryErode4->Update();
+//        binaryErode4->Update();
 
         // 
-        // fill holes in the binary image slice by slice
+        // fill holes in the binary image slice by slice (fills in air inside the body)
         //
         typedef itk::SliceBySliceImageFilter< MaskImageType, MaskImageType > SliceFilterType;
         SliceFilterType::Pointer sliceFilter = SliceFilterType::New();
-        sliceFilter->SetInput( binaryErode4->GetOutput() );
+        sliceFilter->SetInput( maskImage /* binaryErode4->GetOutput() */ ); // disable the smoothing from before
+
+        if (0) { // debug, save the body mask 
+           typedef itk::ImageFileWriter< MaskImageType > WriterType;
+           WriterType::Pointer writer = WriterType::New();
+          // check if that directory exists, create before writing
+           path p("/tmp/");
+           writer->SetFileName( "/tmp/body_mask.nii" );
+           writer->SetInput( maskImage );
+      
+           std::cout  << "Writing the initial mask image as " << std::endl;
+           std::cout  << "/tmp/body_mask.nii" << std::endl << std::endl;
+
+           try
+           {
+             writer->Update();
+           } catch (itk::ExceptionObject &ex) {
+             std::cout << ex << std::endl;
+             return EXIT_FAILURE;
+           }
+        }
+
+
+
 
         typedef itk::BinaryFillholeImageFilter< SliceFilterType::InternalInputImageType > HoleFillFilterType;    
         HoleFillFilterType::Pointer holefillfilter = HoleFillFilterType::New();
@@ -450,17 +473,19 @@ int main( int argc, char* argv[] ) {
         // next we need to segment air inside that mask (do we need to make the mask tighter?, do we need to smooth the input? do we need to calculate this on a smaller scale?)
         // use binaryErode2->GetOutput(), labelShapeKeepNObjectsImageFilter->GetOutput(), and inputImage to get lung mask
 
-        MaskImageType::Pointer mask1 = binaryErode4->GetOutput();
+        MaskImageType::Pointer mask1 = maskImage; // binaryErode4->GetOutput();
         ImageType::Pointer mask2     = labelShapeKeepNObjectsImageFilter->GetOutput();  // body mask
-        MaskImageType::Pointer mask = MaskImageType::New();
+        MaskImageType::Pointer mask  = MaskImageType::New();
         MaskImageType::RegionType maskRegion  = inputImage->GetLargestPossibleRegion();
         MaskImageType::RegionType mask1Region = mask1->GetLargestPossibleRegion();
         ImageType::RegionType mask2Region     = mask2->GetLargestPossibleRegion();
   
         mask->SetRegions(maskRegion);
         mask->Allocate();
+        mask->FillBuffer( itk::NumericTraits< PixelType >::Zero );
         mask->SetOrigin(inputImage->GetOrigin());
         mask->SetSpacing(inputImage->GetSpacing());
+        mask->SetDirection(inputImage->GetDirection());
         MaskImageType::SizeType regionSize = maskRegion.GetSize();
         itk::ImageRegionIterator<MaskImageType> maskIterator(mask,maskRegion);
         itk::ImageRegionIterator<MaskImageType> inputMask1Iterator(mask1,mask1Region);
@@ -471,8 +496,6 @@ int main( int argc, char* argv[] ) {
           if (inputMask2Iterator.Get() > 0 && inputMask1Iterator.Get() == 0) {
           // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0]) / 2) {
               maskIterator.Set(1);
-          } else {
-              maskIterator.Set(0);
           }
           ++maskIterator;
           ++inputMask1Iterator;
@@ -573,6 +596,7 @@ int main( int argc, char* argv[] ) {
         labelField->Allocate();
         labelField->SetOrigin(inputImage->GetOrigin());
         labelField->SetSpacing(inputImage->GetSpacing());
+        labelField->SetDirection(inputImage->GetDirection());
         itk::ImageRegionIterator<MaskImageType> labelFieldIterator(labelField, labelFieldRegion);
 
         // as the background voxel we can use the first voxel overall
@@ -621,6 +645,9 @@ int main( int argc, char* argv[] ) {
         if (saveLabelField) {
            typedef itk::ImageFileWriter< MaskImageType > WriterType;
            WriterType::Pointer writer = WriterType::New();
+          // check if that directory exists, create before writing
+           path p(labelfieldfilename);
+           create_directories(p.parent_path());
            writer->SetFileName( labelfieldfilename );
            writer->SetInput( labelField );
       
@@ -639,6 +666,15 @@ int main( int argc, char* argv[] ) {
              return EXIT_FAILURE;
            }
         }
+
+        // in some slices we have more information, for example if there are only two objects in a 
+        // slice we can assume that we have the left and the right lung. If there are three objects
+        // the middle one would be the trachae.
+
+        // we can also just give up and start computing a lung average image after elastic registration
+        // that one could be segmented and we take the label from there (if air and over average, use 
+        // label from average).
+
 
         ////////////////////////////////////////////////////////////////////////////////////////////////
         // we should now split the lungs into the airways and the lungs using region growing
@@ -779,8 +815,10 @@ int main( int argc, char* argv[] ) {
         MaskImageType::RegionType regionGrowingFieldRegion  = inputImage->GetLargestPossibleRegion();
         regionGrowingField->SetRegions(regionGrowingFieldRegion);
         regionGrowingField->Allocate();
+        regionGrowingField->FillBuffer( itk::NumericTraits< PixelType >::Zero );
         regionGrowingField->SetOrigin(inputImage->GetOrigin());
         regionGrowingField->SetSpacing(inputImage->GetSpacing());
+        regionGrowingField->SetDirection(inputImage->GetDirection());
         // itk::ImageRegionIterator<MaskImageType> regionGrowingFieldIterator(regionGrowingField, regionGrowingFieldRegion);
         // how to we find neighboring voxel from current location minSeedx and minSeedy and sliceSeedStart?
         using PointType = itk::Point< int, MaskImageType::ImageDimension >;
@@ -805,11 +843,13 @@ int main( int argc, char* argv[] ) {
           count++;
           //fprintf(stdout, "frontSize is %d\n", front.size());
           // how do we check the first value from front in labelField? We want to know if the value is 0
+          //fprintf(stderr, "size of front before step %d: %lu\n", count, front.size());
           PointType p;
           p[0] = front[0][0];
           p[1] = front[0][1];
           p[2] = front[0][2];
           front.erase(front.begin());
+          //fprintf(stderr, "remove one front pixel in step %d. Size of front is now: %lu\n", count, front.size());
           //pixelIndex = {{p[0], p[1], p[2]}};
           //fprintf(stdout, "read pixel value at location %d %d %d as : %d\n", p[0], p[1], p[2], inImage->GetPixel(pixelIndex));
 
@@ -827,6 +867,7 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp1);
+              //fprintf(stderr, "add pp1\n");
             }
           }
 
@@ -842,6 +883,7 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp2);
+              //fprintf(stderr, "add pp2\n");
             }
           }
 
@@ -857,6 +899,7 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp3);
+              //fprintf(stderr, "add pp3\n");
             }
           }
 
@@ -872,6 +915,7 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp4);
+              //fprintf(stderr, "add pp4\n");
             }
           }
 
@@ -887,6 +931,7 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp5);
+              //fprintf(stderr, "add pp5\n");
             }
           }
 
@@ -902,16 +947,17 @@ int main( int argc, char* argv[] ) {
               // add to front as a new pixel
               regionGrowingField->SetPixel(pixelIndex, 1);
               front.push_back(pp6);
+              //fprintf(stderr, "add pp6\n");
             }
           }
           // how long is the list in front? This burn in phase might not be required,
           // if we can add all pixel of the initial trachea into the region of interest
-          if (count == 1000) {
+          if (count == 50000) {
             frontSize = front.size();
-            fprintf(stdout, "frontSize after 1000 is %d\n", frontSize);
+            fprintf(stdout, "frontSize after 50000 is %d\n", frontSize);
           }
-          if (count > 1000) {
-            fprintf(stdout, "iteration on frontSize: %lu\n", front.size());
+          if (count > 50000) {
+            //fprintf(stdout, "iteration on frontSize: %lu\n", front.size());
             if (front.size() > frontSize * 2)
             {
               // found the last entry
@@ -932,6 +978,10 @@ int main( int argc, char* argv[] ) {
             a = labelfieldfilename + "_trachea.nii";
           else
             a = labelfieldfilename.substr(0, lastdot) + "_trachea.nii";
+
+          // make sure this directory exists
+          path p(labelfieldfilename);
+          create_directories(p.parent_path());
 
           // std::string a(labelfieldfilename + "trachea.nii");
           writer->SetFileName(a);
@@ -982,6 +1032,9 @@ int main( int argc, char* argv[] ) {
           else
             a = labelfieldfilename.substr(0, lastdot) + "_lung_no_trachea.nii";
 
+          path p(labelfieldfilename);
+          create_directories(p.parent_path());
+
           // std::string a(labelfieldfilename + "trachea.nii");
           writer->SetFileName(a);
           writer->SetInput( no_trachea );
@@ -998,136 +1051,306 @@ int main( int argc, char* argv[] ) {
           }
         }
 
+        // ok special sauce to separate the two lung regions from each other (might touch at the front)
+        // we can start at the level that has three objects and look at each slice going down. If we
+        // ignore the trachea we can calculate an area where the lungs touch (first slice after we have
+        // one object instead of two). If we make the two objects larger (dilate) and subtract them from each
+        // other we should get the touching voxel (in both) that we can remove - to get two separate objects
+        // again, we can repeat this procedure for as long as we have our objects (2) in the current slice.
+        // That should separate them from each other. Additionally we could remove high intensity voxel...
 
+        // lung mask without trachea: no_trachea
 
-        if (0) {
-          // we should make the volume isotropic first, before we do the hessian
-          typedef itk::ResampleImageFilter< ImageType, ImageType >  ResampleFilterType;
-          ResampleFilterType::Pointer resampler = ResampleFilterType::New();
-          typedef itk::IdentityTransform< double, Dimension >  TransformType;
+        // trachea are in: regionGrowingField
 
-          TransformType::Pointer transform = TransformType::New();
-          transform->SetIdentity();
-          resampler->SetTransform( transform );
+        // slice where we have three objects (tachea and two lungs): sliceSeedStart
+        int slice = sliceSeedStart;
+        ImageType::Pointer lastTwoLungRegions;
+        MaskImageType::Pointer label1;
+        MaskImageType::Pointer label2;
+        for (; slice >= 0; slice--) { // correct orientation to go through the volume (top to bottom of body)
+          // how many objects do we have in this slice if we ignore the trachea?
+          size[2] = 1; // we extract along z direction
+          ImageType::IndexType start = inputRegion.GetIndex();
+          start[2] = slice;
+          ImageType::RegionType desiredRegion;
+          desiredRegion.SetSize(  size  );
+          desiredRegion.SetIndex( start );
+          extractFilter->SetExtractionRegion( desiredRegion );
+          extractFilter->SetInput( no_trachea );
 
-          typedef itk::WindowedSincInterpolateImageFunction< ImageType, 3 >  WindowedSincInterpolatorType;
-          WindowedSincInterpolatorType::Pointer windowedSincInterpolator = WindowedSincInterpolatorType::New();
-          resampler->SetInterpolator( windowedSincInterpolator );
+          // Now we can run connected components on the 2D image of the slice
+          // we expect 2 distinct regions (the two lungs)
+          ConnectedComponentImageFilterType::Pointer connected4 = ConnectedComponentImageFilterType::New ();
+          connected4->SetInput( extractFilter->GetOutput() );
+          connected4->Update();
 
-          resampler->SetDefaultPixelValue( -1024 ); // Hounsfield Units for Air
+          labelType::Pointer labelTmp = labelType::New();
+          labelTmp->SetInput( connected4->GetOutput() );
+          labelTmp->SetComputePerimeter(true);
+          labelTmp->Update();
 
-          const ImageType::SpacingType & inputSpacing = inputImage->GetSpacing();
+          LabelMapType *labelMapTmp = labelTmp->GetOutput();
+          ImageType::Pointer twoLungRegions;
+          // if we have more than 2 objects, lets only use the largest 2, this ignores islands in single slices
+          if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
+            // keep only the large connected component
+            typedef itk::LabelShapeKeepNObjectsImageFilter< ImageType > LabelShapeKeepNObjectsImageMaskFilterType;
+            LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter3 = LabelShapeKeepNObjectsImageMaskFilterType::New();
+            labelShapeKeepNObjectsImageFilter3->SetInput( connected4->GetOutput() );
+            labelShapeKeepNObjectsImageFilter3->SetBackgroundValue( 0 );
+            labelShapeKeepNObjectsImageFilter3->SetNumberOfObjects( 2 );
+            labelShapeKeepNObjectsImageFilter3->SetAttribute( LabelShapeKeepNObjectsImageFilterType::LabelObjectType::NUMBER_OF_PIXELS);
+            labelShapeKeepNObjectsImageFilter3->Update();
 
-          double minSpacing = itk::NumericTraits< double >::max();
-          for (int i = 0; i < 3; i++) {
-            minSpacing = (minSpacing > inputSpacing[i] ? inputSpacing[i] : minSpacing);
+            twoLungRegions = labelShapeKeepNObjectsImageFilter3->GetOutput();
+
+            if (slice == sliceSeedStart) {
+              lastTwoLungRegions = twoLungRegions;
+            }
+            fprintf(stderr, "slice %d, two or more objects %lu...\n", slice, labelMapTmp->GetNumberOfLabelObjects());
+          } else { // we have 1 (or none) region
+            fprintf(stderr, "slice %d, single object, separate them now...\n", slice);
+            // the two objects are in lastTwoLungRegions and marked there with two different values (from connected4)
+
+            // do a region growing on label1 and label2
+            DilateFilterType::Pointer dilate  = DilateFilterType::New(); 
+            StructuringElementType  structElement;
+            structElement.SetRadius( 1 );  // 3x3 structuring element, larger radius will make the separation larger (depends on voxel size)
+            structElement.CreateStructuringElement();
+            dilate->SetKernel( structElement );
+            dilate->SetDilateValue( 1 );
+
+            dilate->SetInput(label1);
+            dilate->Update();
+            MaskImageType::Pointer tmpLabel1 = dilate->GetOutput();
+            tmpLabel1->DisconnectPipeline();
+            dilate->SetInput(label2);
+            dilate->Update();
+            MaskImageType::Pointer tmpLabel2 = dilate->GetOutput();
+            tmpLabel2->DisconnectPipeline();
+            label1 = tmpLabel1;
+            label2 = tmpLabel2;
+            // now remove the overlap from the 'slice' mask (this should work if the images are sufficiently similar)
+            ImageType::RegionType re = label1->GetLargestPossibleRegion();
+            itk::ImageRegionIterator<MaskImageType> imIterator1(label1,re);
+            itk::ImageRegionIterator<MaskImageType> imIterator2(label2,re);
+            itk::ImageRegionIterator<MaskImageType> dR(no_trachea, desiredRegion); // should be the location of the current slice in the whole volume
+            while (!imIterator1.IsAtEnd() && !imIterator2.IsAtEnd() && !dR.IsAtEnd()) {
+              //fprintf(stdout, "Start iterating after dilation...\n");
+              if (imIterator1.Get() > 0 && imIterator2.Get() > 0) { // this voxel is an overlap between the two slices, remove from our mask
+                //fprintf(stdout, "Found overlap voxel in no_trachea with label %d\n", dR.Get());
+                dR.Set(0); // remove from no_trachea
+                imIterator1.Set(0);
+                imIterator2.Set(0);
+              }
+              ++imIterator1;
+              ++imIterator2;
+              ++dR;
+            }
+            // now we have changed the slice (hopefully they are separated now)
           }
-          
-          ImageType::SpacingType outputSpacing;
-          outputSpacing[0] = minSpacing;
-          outputSpacing[1] = minSpacing;
-          outputSpacing[2] = minSpacing;
 
-          resampler->SetOutputSpacing( outputSpacing );
+          // remember the last slices regions (exactly 2 regions in here)
+          lastTwoLungRegions = twoLungRegions;
+          // store the two regions as separate slices region1 and region2
+          if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
+            label1 = MaskImageType::New();
+            label2 = MaskImageType::New();
+            ImageType::RegionType re = twoLungRegions->GetLargestPossibleRegion();
+            label1->SetRegions(re);
+            label2->SetRegions(re);
+            label1->Allocate();
+            label2->Allocate();
+            label1->FillBuffer( itk::NumericTraits< PixelType >::Zero );
+            label2->FillBuffer( itk::NumericTraits< PixelType >::Zero );
+            itk::ImageRegionIterator<ImageType>     imIt(connected4->GetOutput(),re);
+            itk::ImageRegionIterator<ImageType>     imIt2(twoLungRegions,re);
+            itk::ImageRegionIterator<MaskImageType> imIterator1(label1,re);
+            itk::ImageRegionIterator<MaskImageType> imIterator2(label2,re);
+            std::vector<int> labelValues;
+            while (!imIt.IsAtEnd()) {
+                if (imIt.Get() != 0) {
+                  //fprintf(stdout, "found non-zero voxel: %d\n", imIt.Get());
+                  if (!(std::find(labelValues.begin(), labelValues.end(), imIt.Get()) != labelValues.end()))
+                    labelValues.push_back(imIt.Get());
+                }
+                ++imIt;
+            }
+            imIt.GoToBegin();
+            fprintf(stdout, "found %lu label values: %d %d\n", labelValues.size(), labelValues[0], labelValues[1]);
+            // now copy values into label1 and label2
+            while (!imIt.IsAtEnd() && !imIt2.IsAtEnd() && !imIterator1.IsAtEnd() && !imIterator2.IsAtEnd()) {
+              // ok we copy into label1 if we find labelValue[0] in connected4 and >0 in imIt2
+              if (imIt2.Get() > 0 && imIt.Get() == labelValues[0]) {
+                imIterator1.Set(1);
+              }
+              if (imIt2.Get() > 0 && imIt.Get() == labelValues[1]) {
+                imIterator2.Set(1);
+              }
+              ++imIt;
+              ++imIt2;
+              ++imIterator1;
+              ++imIterator2;
+            }
+            // we need to make sure that label1 and label2 look ok now
 
-          resampler->SetOutputOrigin( inputImage->GetOrigin() );
-          resampler->SetOutputDirection( inputImage->GetDirection() );
-
-          ImageType::SizeType   inputSize = inputImage->GetLargestPossibleRegion().GetSize();
-          
-          typedef ImageType::SizeType::SizeValueType SizeValueType;
-
-          const double dx = inputSize[0] * inputSpacing[0] / outputSpacing[0];
-          const double dy = inputSize[1] * inputSpacing[1] / outputSpacing[1];
-          const double dz = inputSize[2] * inputSpacing[2] / outputSpacing[2];
-
-          ImageType::SizeType   finalSize;
-
-          finalSize[0] = static_cast<SizeValueType>( dx );
-          finalSize[1] = static_cast<SizeValueType>( dy );
-          finalSize[2] = static_cast<SizeValueType>( dz );
-
-          fprintf(stdout, "finalSize of output is: %lu %lu %lu\n", finalSize[0], finalSize[1], finalSize[2]);
-          resampler->SetSize( finalSize );
-          resampler->SetInput( inputImage );
-
-
-          // Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
-          using HessianFilterType = itk::HessianRecursiveGaussianImageFilter<ImageType>;
-          HessianFilterType::Pointer hessianFilter = HessianFilterType::New();
-          hessianFilter->SetInput( resampler->GetOutput() );
-          hessianFilter->SetSigma( static_cast< double >( 1.0f ) );
-          // now we need to get the three eigenvalues of the hessian to create our filter
-          typedef  itk::FixedArray< double, 3 > EigenValueArrayType;
-          typedef  itk::Image< EigenValueArrayType, 3 > EigenValueImageType;
-
-          typedef  itk::SymmetricEigenAnalysisImageFilter< HessianFilterType::OutputImageType, EigenValueImageType > EigenAnalysisFilterType;
-          typename EigenAnalysisFilterType::Pointer m_SymmetricEigenValueFilter;
-
-          m_SymmetricEigenValueFilter = EigenAnalysisFilterType::New();
-          m_SymmetricEigenValueFilter->SetDimension( 3 );
-          m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByValue );
-          // sorting by value sorts from lowest (most negative to highest eigenvalue 01 < 02 < 03)
-
-          //m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByMagnitude );
-
-          m_SymmetricEigenValueFilter->SetInput( hessianFilter->GetOutput() );
-          m_SymmetricEigenValueFilter->Update();
-
-          typedef typename EigenAnalysisFilterType::OutputImageType EigenValueOutputImageType;
-          const typename EigenValueOutputImageType::ConstPointer eigenImage = m_SymmetricEigenValueFilter->GetOutput();
-
-          EigenValueArrayType eigenValue;
-          itk::ImageRegionConstIterator<EigenValueOutputImageType> it;
-          it = itk::ImageRegionConstIterator<EigenValueOutputImageType>( eigenImage, eigenImage->GetLargestPossibleRegion());
-          
-          // create a new output image for the eigenvalue filter result
-          ImageType::Pointer vessels = ImageType::New();
-          ImageType::RegionType vesselRegion  = eigenImage->GetLargestPossibleRegion();
-          vessels->SetRegions(vesselRegion);
-          vessels->Allocate();
-          vessels->SetOrigin(inputImage->GetOrigin());
-          vessels->SetSpacing(inputImage->GetSpacing());
-          itk::ImageRegionIterator<ImageType> vesselIterator(vessels, vesselRegion);
-
-          ImageType::Pointer walls = ImageType::New();
-          ImageType::RegionType wallRegion  = eigenImage->GetLargestPossibleRegion();
-          walls->SetRegions(wallRegion);
-          walls->Allocate();
-          walls->SetOrigin(inputImage->GetOrigin());
-          walls->SetSpacing(inputImage->GetSpacing());
-          itk::ImageRegionIterator<ImageType> wallIterator(walls, wallRegion);
-
-          // calculate the maximum eigenvalue (absolute first)
-          double maxS = 0.0;
-          double a = 0.0;
-          it.GoToBegin();
-          while (!it.IsAtEnd()) {
-            // Get the eigen value
-            eigenValue = it.Get();
-            a = sqrt( (eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
-            if (a > maxS)
-              maxS = a;
-            ++it;
           }
-          fprintf(stdout, "maxS : %f\n", maxS);
-          double ce = maxS/2.0;
 
-          it.GoToBegin();
-          vesselIterator.GoToBegin();
-          wallIterator.GoToBegin();
-          double wallMax = 0.0;
-          double wallMin = 0.0;
-          bool firstTime = true;
-          while (!it.IsAtEnd() && !vesselIterator.IsAtEnd()) {
-            // Get the eigen value
-            eigenValue = it.Get();
-            
-            // normalizeValue <= 0 for bright line structures
-            double e0 = eigenValue[0];
-            double e1 = eigenValue[1];
-            double e2 = eigenValue[2];
-            /*
+        }
+
+        if (1) { // debug output 
+          typedef itk::ImageFileWriter< MaskImageType > WriterType;
+          WriterType::Pointer writer = WriterType::New();
+
+          // std::string a(labelfieldfilename + "trachea.nii");
+          writer->SetFileName( "/tmp/no_trachea_separated.nii" );
+          writer->SetInput( no_trachea );
+      
+          std::cout  << "Writing the no trachea separated mask as " << std::endl;
+          std::cout  <<  "/tmp/no_trachea_separated.nii" << std::endl << std::endl;
+
+          try  {
+            writer->Update();
+          } catch (itk::ExceptionObject &ex) {
+            std::cout << ex << std::endl;
+            return EXIT_FAILURE;
+          }
+        }
+
+
+
+          if (0)
+          {
+            // we should make the volume isotropic first, before we do the hessian
+            typedef itk::ResampleImageFilter<ImageType, ImageType> ResampleFilterType;
+            ResampleFilterType::Pointer resampler = ResampleFilterType::New();
+            typedef itk::IdentityTransform<double, Dimension> TransformType;
+
+            TransformType::Pointer transform = TransformType::New();
+            transform->SetIdentity();
+            resampler->SetTransform(transform);
+
+            typedef itk::WindowedSincInterpolateImageFunction<ImageType, 3> WindowedSincInterpolatorType;
+            WindowedSincInterpolatorType::Pointer windowedSincInterpolator = WindowedSincInterpolatorType::New();
+            resampler->SetInterpolator(windowedSincInterpolator);
+
+            resampler->SetDefaultPixelValue(-1024); // Hounsfield Units for Air
+
+            const ImageType::SpacingType &inputSpacing = inputImage->GetSpacing();
+
+            double minSpacing = itk::NumericTraits<double>::max();
+            for (int i = 0; i < 3; i++)
+            {
+              minSpacing = (minSpacing > inputSpacing[i] ? inputSpacing[i] : minSpacing);
+            }
+
+            ImageType::SpacingType outputSpacing;
+            outputSpacing[0] = minSpacing;
+            outputSpacing[1] = minSpacing;
+            outputSpacing[2] = minSpacing;
+
+            resampler->SetOutputSpacing(outputSpacing);
+
+            resampler->SetOutputOrigin(inputImage->GetOrigin());
+            resampler->SetOutputDirection(inputImage->GetDirection());
+
+            ImageType::SizeType inputSize = inputImage->GetLargestPossibleRegion().GetSize();
+
+            typedef ImageType::SizeType::SizeValueType SizeValueType;
+
+            const double dx = inputSize[0] * inputSpacing[0] / outputSpacing[0];
+            const double dy = inputSize[1] * inputSpacing[1] / outputSpacing[1];
+            const double dz = inputSize[2] * inputSpacing[2] / outputSpacing[2];
+
+            ImageType::SizeType finalSize;
+
+            finalSize[0] = static_cast<SizeValueType>(dx);
+            finalSize[1] = static_cast<SizeValueType>(dy);
+            finalSize[2] = static_cast<SizeValueType>(dz);
+
+            fprintf(stdout, "finalSize of output is: %lu %lu %lu\n", finalSize[0], finalSize[1], finalSize[2]);
+            resampler->SetSize(finalSize);
+            resampler->SetInput(inputImage);
+
+            // Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
+            using HessianFilterType = itk::HessianRecursiveGaussianImageFilter<ImageType>;
+            HessianFilterType::Pointer hessianFilter = HessianFilterType::New();
+            hessianFilter->SetInput(resampler->GetOutput());
+            hessianFilter->SetSigma(static_cast<double>(1.0f));
+            // now we need to get the three eigenvalues of the hessian to create our filter
+            typedef itk::FixedArray<double, 3> EigenValueArrayType;
+            typedef itk::Image<EigenValueArrayType, 3> EigenValueImageType;
+
+            typedef itk::SymmetricEigenAnalysisImageFilter<HessianFilterType::OutputImageType, EigenValueImageType> EigenAnalysisFilterType;
+            typename EigenAnalysisFilterType::Pointer m_SymmetricEigenValueFilter;
+
+            m_SymmetricEigenValueFilter = EigenAnalysisFilterType::New();
+            m_SymmetricEigenValueFilter->SetDimension(3);
+            m_SymmetricEigenValueFilter->OrderEigenValuesBy(EigenAnalysisFilterType::FunctorType::OrderByValue);
+            // sorting by value sorts from lowest (most negative to highest eigenvalue 01 < 02 < 03)
+
+            //m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByMagnitude );
+
+            m_SymmetricEigenValueFilter->SetInput(hessianFilter->GetOutput());
+            m_SymmetricEigenValueFilter->Update();
+
+            typedef typename EigenAnalysisFilterType::OutputImageType EigenValueOutputImageType;
+            const typename EigenValueOutputImageType::ConstPointer eigenImage = m_SymmetricEigenValueFilter->GetOutput();
+
+            EigenValueArrayType eigenValue;
+            itk::ImageRegionConstIterator<EigenValueOutputImageType> it;
+            it = itk::ImageRegionConstIterator<EigenValueOutputImageType>(eigenImage, eigenImage->GetLargestPossibleRegion());
+
+            // create a new output image for the eigenvalue filter result
+            ImageType::Pointer vessels = ImageType::New();
+            ImageType::RegionType vesselRegion = eigenImage->GetLargestPossibleRegion();
+            vessels->SetRegions(vesselRegion);
+            vessels->Allocate();
+            vessels->SetOrigin(inputImage->GetOrigin());
+            vessels->SetSpacing(inputImage->GetSpacing());
+            itk::ImageRegionIterator<ImageType> vesselIterator(vessels, vesselRegion);
+
+            ImageType::Pointer walls = ImageType::New();
+            ImageType::RegionType wallRegion = eigenImage->GetLargestPossibleRegion();
+            walls->SetRegions(wallRegion);
+            walls->Allocate();
+            walls->SetOrigin(inputImage->GetOrigin());
+            walls->SetSpacing(inputImage->GetSpacing());
+            itk::ImageRegionIterator<ImageType> wallIterator(walls, wallRegion);
+
+            // calculate the maximum eigenvalue (absolute first)
+            double maxS = 0.0;
+            double a = 0.0;
+            it.GoToBegin();
+            while (!it.IsAtEnd())
+            {
+              // Get the eigen value
+              eigenValue = it.Get();
+              a = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
+              if (a > maxS)
+                maxS = a;
+              ++it;
+            }
+            fprintf(stdout, "maxS : %f\n", maxS);
+            double ce = maxS / 2.0;
+
+            it.GoToBegin();
+            vesselIterator.GoToBegin();
+            wallIterator.GoToBegin();
+            double wallMax = 0.0;
+            double wallMin = 0.0;
+            bool firstTime = true;
+            while (!it.IsAtEnd() && !vesselIterator.IsAtEnd())
+            {
+              // Get the eigen value
+              eigenValue = it.Get();
+
+              // normalizeValue <= 0 for bright line structures
+              double e0 = eigenValue[0];
+              double e1 = eigenValue[1];
+              double e2 = eigenValue[2];
+              /*
             Bright tubular structures will have low $\lambda_1$ and large negative values of $\lambda_2$ and $\lambda_3$.
             Conversely dark tubular structures will have a low value of $\lambda_1$ and large positive values of $\lambda_2$ and $\lambda_3$.
             Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
@@ -1135,63 +1358,95 @@ int main( int argc, char* argv[] ) {
             Bright spherical (blob) like structures have all three eigen values as large negative numbers
             Dark spherical (blob) like structures have all three eigen values as large positive numbers
             */
-            //fprintf(stdout, "%f %f %f", e0, e1, e2);
-            double mag = sqrt( (eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]) );
-            // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by magnitude
-            double Rb = .5 * std::exp(-(1-0.7)) * std::fabs(eigenValue[0]);
-            double beta = 1;
-            double scale = 1;
-            vesselIterator.Set( scale * std::exp(-.5 * Rb * Rb / (beta * beta)) * (1 - std::exp(-.5 * mag * mag / (ce * ce)))  );
+              //fprintf(stdout, "%f %f %f", e0, e1, e2);
+              double mag = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
+              // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by magnitude
+              double Rb = .5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
+              double beta = 1;
+              double scale = 1;
+              vesselIterator.Set(scale * std::exp(-.5 * Rb * Rb / (beta * beta)) * (1 - std::exp(-.5 * mag * mag / (ce * ce))));
 
-            // wall like structures
-            double av = .5 * (eigenValue[1] + eigenValue[2]);
-            if (fabs(av) < 1e-6)
-              av = 1e-6;
-            double Rw = (-1.0 * eigenValue[0]) / av;
-            if (firstTime) {
-              firstTime = false;
-              wallMin = wallMax = Rw;
+              // wall like structures
+              double av = .5 * (eigenValue[1] + eigenValue[2]);
+              if (fabs(av) < 1e-6)
+                av = 1e-6;
+              double Rw = (-1.0 * eigenValue[0]) / av;
+              if (firstTime)
+              {
+                firstTime = false;
+                wallMin = wallMax = Rw;
+              }
+              if (Rw < wallMin)
+                wallMin = Rw;
+              if (Rw > wallMax)
+                wallMax = Rw;
+
+              //Rw = 0.5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
+              //wallIterator.Set( scale * exp(-.5 * Rw * Rw / (beta * beta)) * (1 - exp(-.5 * mag * mag / (ce * ce))) + scale);
+              scale = 1;
+              wallIterator.Set(scale * Rw);
+
+              ++it;
+              ++vesselIterator;
+              ++wallIterator;
             }
-            if (Rw < wallMin)
-              wallMin = Rw;
-            if (Rw > wallMax)
-              wallMax = Rw;
+            fprintf(stdout, "Wall min: %f and wall max is: %f\n", wallMin, wallMax);
 
-            //Rw = 0.5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
-            //wallIterator.Set( scale * exp(-.5 * Rw * Rw / (beta * beta)) * (1 - exp(-.5 * mag * mag / (ce * ce))) + scale);
-            scale = 1;
-            wallIterator.Set( scale * Rw );
+            typedef itk::Image<ImageType, 3> OutputImageType;
+            typedef itk::CastImageFilter<
+                ImageType,
+                ImageType>
+                CastFilterType;
+            CastFilterType::Pointer caster = CastFilterType::New();
+            caster->SetInput(final);
+            //caster->SetInput( maskImage );
+            //caster->SetInput( binaryErode4->GetOutput() );
+            //caster->SetInput( sliceFilter->GetOutput() );
+            // caster->SetInput( labelShapeKeepNObjectsImageFilter->GetOutput() ); // body mask
+            //caster->SetInput( mask1 );
+            //caster->SetInput( mask2 );
+            caster->Update();
 
-            ++it;
-            ++vesselIterator;
-            ++wallIterator;
-          }
-          fprintf(stdout, "Wall min: %f and wall max is: %f\n", wallMin, wallMax);
+            std::cout << "Processing done" << std::endl;
 
-          typedef itk::Image< ImageType, 3 > OutputImageType;
-          typedef itk::CastImageFilter< 
-                          ImageType,
-                          ImageType > CastFilterType;
-          CastFilterType::Pointer  caster =  CastFilterType::New();
-          caster->SetInput( final );
-          //caster->SetInput( maskImage );
-          //caster->SetInput( binaryErode4->GetOutput() );
-          //caster->SetInput( sliceFilter->GetOutput() );
-          // caster->SetInput( labelShapeKeepNObjectsImageFilter->GetOutput() ); // body mask
-          //caster->SetInput( mask1 );
-          //caster->SetInput( mask2 );
-          caster->Update();
+            if (saveNifty)
+            {
+              typedef itk::ImageFileWriter<ImageType> WriterType;
+              WriterType::Pointer writer = WriterType::New();
 
-          std::cout  << "Processing done" << std::endl;
+              std::string volFileName = output + "/" + seriesIdentifier + ".nii";
+              path p(volFileName);
+              create_directories(p.parent_path());
 
-          if (saveNifty) {
-            typedef itk::ImageFileWriter< ImageType > WriterType;
-            WriterType::Pointer writer = WriterType::New();      
+              writer->SetFileName(volFileName);
+              writer->SetInput(final);
+
+              std::cout << "Writing the intensity inside the lung as " << std::endl
+                        << std::endl;
+              std::cout << volFileName << std::endl
+                        << std::endl;
+              resultJSON["lung_intensity"] = std::string(volFileName);
+
+              try
+              {
+                writer->Update();
+              } catch (itk::ExceptionObject &ex) {
+              std::cout << ex << std::endl;
+              return EXIT_FAILURE;
+            }
+
+            // and again
+            writer = WriterType::New();
+
+            p = niftyfilename;
+            create_directories(p.parent_path());
+
             writer->SetFileName( niftyfilename );
             writer->SetInput( vessels );
         
             std::cout  << "Writing the vessel image as " << std::endl << std::endl;
-            std::cout  << argv[2] << std::endl << std::endl;
+            std::cout  <<  niftyfilename << std::endl << std::endl;
+            resultJSON["vessel_image"] = std::string(niftyfilename);
         
             try  {
               writer->Update();
@@ -1201,11 +1456,16 @@ int main( int argc, char* argv[] ) {
             }
 
             //typedef itk::ImageFileWriter< ImageType > WriterType;
-            WriterType::Pointer writer2 = WriterType::New();      
+            WriterType::Pointer writer2 = WriterType::New();
+
+            p = niftyfilename2;
+            create_directories(p.parent_path());
+
             writer2->SetFileName( niftyfilename2 );
             writer2->SetInput( walls );
         
             std::cout  << "Writing the wall image " << std::endl << std::endl;
+            resultJSON["wall_image"] = std::string(niftyfilename2);
         
             try  {
               writer2->Update();
@@ -1215,7 +1475,31 @@ int main( int argc, char* argv[] ) {
             }
 
           }
-        }      
+        }
+
+        if (saveNifty) {
+            typedef itk::ImageFileWriter< ImageType > WriterType;
+            WriterType::Pointer writer = WriterType::New();      
+
+            std::string volFileName = output + "/" + seriesIdentifier + ".nii";
+            path p(volFileName);
+            create_directories(p.parent_path());
+
+            writer->SetFileName( volFileName );
+            writer->SetInput( final );
+        
+            std::cout  << "Writing the intensity inside the lung as " << std::endl << std::endl;
+            std::cout  << volFileName << std::endl << std::endl;
+            resultJSON["lung_intensity"] = std::string(volFileName);
+
+            try  {
+              writer->Update();
+            } catch (itk::ExceptionObject &ex) {
+              std::cout << ex << std::endl;
+              return EXIT_FAILURE;
+            }
+        }
+
         // now save as DICOM
         gdcm::UIDGenerator suid;
         std::string newSeriesUID = suid.Generate();
@@ -1351,7 +1635,9 @@ int main( int argc, char* argv[] ) {
 
   std::string res = resultJSON.dump(4) + "\n";
   std::ostringstream o;
-  o << output << "/" << resultJSON["series_identifier"] << ".json";
+  std::string si(resultJSON["series_identifier"]);
+  si.erase(std::remove(si.begin(), si.end(), '\"'), si.end());
+  o << output << "/" << si << ".json";
   std::ofstream out(o.str());
   out << res;
   out.close();
