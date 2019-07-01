@@ -1,3 +1,4 @@
+// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5489231/
 #include "itkGDCMImageIO.h"
 #include "itkGDCMSeriesFileNames.h"
 #include "itkSmoothingRecursiveGaussianImageFilter.h"
@@ -22,6 +23,7 @@
 #include "itkSymmetricSecondRankTensor.h"
 #include "itkSymmetricEigenAnalysisImageFilter.h"
 #include "itkImageAdaptor.h"
+#include "itkRGBPixel.h"
 //#include <itkPixelAccessor.h>
 #include "itkImageRegionIterator.h"
 #include "itkImageRegionConstIterator.h"
@@ -30,12 +32,30 @@
 #include "itkBSplineInterpolateImageFunction.h"
 #include "itkWindowedSincInterpolateImageFunction.h"
 #include "itkExtractImageFilter.h"
+#include "itkScalarImageToHistogramGenerator.h"
 
 #include "itkShrinkImageFilter.h"
 #include "itkConstantPadImageFilter.h"
 #include "gdcmUIDGenerator.h"
-#include "itkMetaDataDictionary.h"
+#include "gdcmImageHelper.h"
+#include "gdcmFileExplicitFilter.h"
+#include "gdcmImageChangeTransferSyntax.h"
+#include "gdcmDataSetHelper.h"
+#include "gdcmStringFilter.h"
+#include "gdcmImageApplyLookupTable.h"
+#include "gdcmImageChangePlanarConfiguration.h"
+#include "gdcmRescaler.h"
+#include "gdcmImageReader.h"
+#include "gdcmImageWriter.h"
+#include "gdcmAttribute.h"
+#include "gdcmGlobal.h"
+#include "gdcmMediaStorage.h"
+#include "gdcmFileDerivation.h"
+#include "gdcmAnonymizer.h"
 
+#include "itkGDCMImageIO.h"
+
+#include "itkMetaDataDictionary.h"
 #include "json.hpp"
 #include "metaCommand.h"
 #include <map>
@@ -532,7 +552,7 @@ int main( int argc, char* argv[] ) {
 
         for (unsigned int n = 0; n < labelMap->GetNumberOfLabelObjects(); ++n) {
           ShapeLabelObjectType *labelObject = labelMap->GetNthLabelObject(n);
-          fprintf(stdout, "object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+          //fprintf(stdout, "object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
           
           if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number of pixel
             useNObjects++;
@@ -1063,7 +1083,7 @@ int main( int argc, char* argv[] ) {
 
         // trachea are in: regionGrowingField
 
-        // slice where we have three objects (tachea and two lungs): sliceSeedStart
+        // slice where we have three objects (trachea and two lungs): sliceSeedStart
         int slice = sliceSeedStart;
         ImageType::Pointer lastTwoLungRegions;
         MaskImageType::Pointer label1;
@@ -1083,7 +1103,7 @@ int main( int argc, char* argv[] ) {
           // we expect 2 distinct regions (the two lungs)
           ConnectedComponentImageFilterType::Pointer connected4 = ConnectedComponentImageFilterType::New ();
           connected4->SetInput( extractFilter->GetOutput() );
-          connected4->Update();
+          //connected4->Update();
 
           labelType::Pointer labelTmp = labelType::New();
           labelTmp->SetInput( connected4->GetOutput() );
@@ -1091,32 +1111,55 @@ int main( int argc, char* argv[] ) {
           labelTmp->Update();
 
           LabelMapType *labelMapTmp = labelTmp->GetOutput();
+          //labelMapTmp->DisconnectPipeline(); // we want to use extractFilter again, without running the next part
           ImageType::Pointer twoLungRegions;
+          // problem is that the number is not a good indicator of separation, instead it should be the
+          // number after filtering out the small islands per slice, so we need to filter all objects by area
+          // with a minimum area per slice
+          int lungAreas = 0; // areas large enough to be a single lung
+          for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); ++n) {
+            ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
+            if (labelObject->GetNumberOfPixels() > 10000) { // per slice, todo: convert to volume, problem could be that we are too far up in the stack of slices with small volumes
+              fprintf(stdout, "could be a lung because its large (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+              lungAreas++;
+            } 
+            //fprintf(stdout, "is this a lung? (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+          }
+          fprintf(stdout, "FOUND %d lung area%s\n", lungAreas, lungAreas!=1?"s":"");
+          if (lungAreas == 1) {
+            // todo: would be better to do this twice, once from below and once from above (limit the effect of direction)
+            // would also be good to look for bright pixel in the separating region, using image information would be better
+            fprintf(stdout, "SEPARATE THEM (using information from previous slice)!\n"); // using the labels from the slice above
+          }
+
           // if we have more than 2 objects, lets only use the largest 2, this ignores islands in single slices
-          if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
-            // keep only the large connected component
-            typedef itk::LabelShapeKeepNObjectsImageFilter< ImageType > LabelShapeKeepNObjectsImageMaskFilterType;
-            LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter3 = LabelShapeKeepNObjectsImageMaskFilterType::New();
-            labelShapeKeepNObjectsImageFilter3->SetInput( connected4->GetOutput() );
-            labelShapeKeepNObjectsImageFilter3->SetBackgroundValue( 0 );
-            labelShapeKeepNObjectsImageFilter3->SetNumberOfObjects( 2 );
-            labelShapeKeepNObjectsImageFilter3->SetAttribute( LabelShapeKeepNObjectsImageFilterType::LabelObjectType::NUMBER_OF_PIXELS);
-            labelShapeKeepNObjectsImageFilter3->Update();
+          //if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
+          // keep only the large connected component
+          typedef itk::LabelShapeKeepNObjectsImageFilter< ImageType > LabelShapeKeepNObjectsImageMaskFilterType;
+          LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter3 = LabelShapeKeepNObjectsImageMaskFilterType::New();
+          labelShapeKeepNObjectsImageFilter3->SetInput( connected4->GetOutput() );
+          labelShapeKeepNObjectsImageFilter3->SetBackgroundValue( 0 );
+          labelShapeKeepNObjectsImageFilter3->SetNumberOfObjects( 2 );
+          labelShapeKeepNObjectsImageFilter3->SetAttribute( LabelShapeKeepNObjectsImageFilterType::LabelObjectType::NUMBER_OF_PIXELS);
+          labelShapeKeepNObjectsImageFilter3->Update();
 
-            twoLungRegions = labelShapeKeepNObjectsImageFilter3->GetOutput();
+          twoLungRegions = labelShapeKeepNObjectsImageFilter3->GetOutput();
 
-            if (slice == sliceSeedStart) {
-              lastTwoLungRegions = twoLungRegions;
-            }
-            fprintf(stderr, "slice %d, two or more objects %lu...\n", slice, labelMapTmp->GetNumberOfLabelObjects());
-          } else { // we have 1 (or none) region
+          if (slice == sliceSeedStart) {
+            lastTwoLungRegions = twoLungRegions;
+          }
+          fprintf(stderr, "slice %d, #objects: %lu...\n", slice, labelMapTmp->GetNumberOfLabelObjects());
+          if (labelMapTmp->GetNumberOfLabelObjects() == 0)
+            continue; // we could end up here at the bottom of the stack
+          //}
+          if (lungAreas == 1) { // we have 1 (or none) region, here we assume that we have a previous ok slice in label1 and label2
             fprintf(stderr, "slice %d, single object, separate them now...\n", slice);
             // the two objects are in lastTwoLungRegions and marked there with two different values (from connected4)
 
             // do a region growing on label1 and label2
             DilateFilterType::Pointer dilate  = DilateFilterType::New(); 
             StructuringElementType  structElement;
-            structElement.SetRadius( 1 );  // 3x3 structuring element, larger radius will make the separation larger (depends on voxel size)
+            structElement.SetRadius( 3 );  // 3x3 structuring element, larger radius will make the separation larger (depends on voxel size)
             structElement.CreateStructuringElement();
             dilate->SetKernel( structElement );
             dilate->SetDilateValue( 1 );
@@ -1136,9 +1179,11 @@ int main( int argc, char* argv[] ) {
             itk::ImageRegionIterator<MaskImageType> imIterator1(label1,re);
             itk::ImageRegionIterator<MaskImageType> imIterator2(label2,re);
             itk::ImageRegionIterator<MaskImageType> dR(no_trachea, desiredRegion); // should be the location of the current slice in the whole volume
+            itk::ImageRegionIterator<ImageType> iR(inputImage, desiredRegion);
+            int thresholdAir = -800;
             while (!imIterator1.IsAtEnd() && !imIterator2.IsAtEnd() && !dR.IsAtEnd()) {
               //fprintf(stdout, "Start iterating after dilation...\n");
-              if (imIterator1.Get() > 0 && imIterator2.Get() > 0) { // this voxel is an overlap between the two slices, remove from our mask
+              if (imIterator1.Get() > 0 && imIterator2.Get() > 0 && iR.Get() > thresholdAir) { // this voxel is an overlap between the two slices, remove from our mask
                 //fprintf(stdout, "Found overlap voxel in no_trachea with label %d\n", dR.Get());
                 dR.Set(0); // remove from no_trachea
                 imIterator1.Set(0);
@@ -1147,14 +1192,45 @@ int main( int argc, char* argv[] ) {
               ++imIterator1;
               ++imIterator2;
               ++dR;
+              ++iR;
             }
             // now we have changed the slice (hopefully they are separated now)
+            // we need to update the label1 and label2 regions again - because we have a new one for the next slice
+            extractFilter->SetExtractionRegion( desiredRegion );
+            extractFilter->SetInput( no_trachea );
+
+            //////////////////////////////////////////////////////////////////////////
+            // we expect 2 distinct regions (the two lungs)
+            // as a sanity check we should make sure that we really have two large enough objects now - that the separation was successful 
+            ConnectedComponentImageFilterType::Pointer connected5 = ConnectedComponentImageFilterType::New ();
+            connected5->SetInput( extractFilter->GetOutput() );
+            //connected5->Update();
+            labelType::Pointer labelTmp2 = labelType::New();
+            labelTmp2->SetInput( connected5->GetOutput() );
+            labelTmp2->SetComputePerimeter(true);
+            labelTmp2->Update();
+
+            LabelMapType *labelMapTmp2 = labelTmp2->GetOutput();
+            fprintf(stdout, "after separation found %lu objects in slice, use the largest two only\n", labelMapTmp2->GetNumberOfLabelObjects());
+
+            // we expect to have two regions now - because the set(0) from above hopefully separated them, if not we should increase the structuring element and try again
+            typedef itk::LabelShapeKeepNObjectsImageFilter< ImageType > LabelShapeKeepNObjectsImageMaskFilterType;
+            LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter4 = LabelShapeKeepNObjectsImageMaskFilterType::New();
+            labelShapeKeepNObjectsImageFilter4->SetInput( connected5->GetOutput() );
+            labelShapeKeepNObjectsImageFilter4->SetBackgroundValue( 0 );
+            labelShapeKeepNObjectsImageFilter4->SetNumberOfObjects( 2 );
+            labelShapeKeepNObjectsImageFilter4->SetAttribute( LabelShapeKeepNObjectsImageFilterType::LabelObjectType::NUMBER_OF_PIXELS);
+            labelShapeKeepNObjectsImageFilter4->Update();
+
+            twoLungRegions = labelShapeKeepNObjectsImageFilter4->GetOutput();
+            connected4 = connected5; // we are looking at these in the next section
+            // this should be sufficient, the next part below is copying the values into label1 and label2 again for the next iteration
           }
 
           // remember the last slices regions (exactly 2 regions in here)
           lastTwoLungRegions = twoLungRegions;
           // store the two regions as separate slices region1 and region2
-          if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
+          //if (lungAreas == 1 /*  labelMapTmp->GetNumberOfLabelObjects() >= 2 */) {
             label1 = MaskImageType::New();
             label2 = MaskImageType::New();
             ImageType::RegionType re = twoLungRegions->GetLargestPossibleRegion();
@@ -1178,37 +1254,104 @@ int main( int argc, char* argv[] ) {
                 ++imIt;
             }
             imIt.GoToBegin();
-            fprintf(stdout, "found %lu label values: %d %d\n", labelValues.size(), labelValues[0], labelValues[1]);
+            if (labelValues.size() > 1)
+              fprintf(stdout, "found %lu label values: %d %d\n", labelValues.size(), labelValues[0], labelValues[1]);
+            else  
+              fprintf(stdout, "found a single %lu label value: %d\n", labelValues.size(), labelValues[0]);
             // now copy values into label1 and label2
-            while (!imIt.IsAtEnd() && !imIt2.IsAtEnd() && !imIterator1.IsAtEnd() && !imIterator2.IsAtEnd()) {
-              // ok we copy into label1 if we find labelValue[0] in connected4 and >0 in imIt2
-              if (imIt2.Get() > 0 && imIt.Get() == labelValues[0]) {
-                imIterator1.Set(1);
+            if (labelValues.size() > 1) {
+              while (!imIt.IsAtEnd() && !imIt2.IsAtEnd() && !imIterator1.IsAtEnd() && !imIterator2.IsAtEnd()) {
+                // ok we copy into label1 if we find labelValue[0] in connected4 and >0 in imIt2
+                if (imIt2.Get() > 0 && imIt.Get() == labelValues[0]) {
+                  imIterator1.Set(1);
+                }
+                if (imIt2.Get() > 0 && imIt.Get() == labelValues[1]) {
+                  imIterator2.Set(1);
+                }
+                ++imIt;
+                ++imIt2;
+                ++imIterator1;
+                ++imIterator2;
               }
-              if (imIt2.Get() > 0 && imIt.Get() == labelValues[1]) {
-                imIterator2.Set(1);
-              }
-              ++imIt;
-              ++imIt2;
-              ++imIterator1;
-              ++imIterator2;
+            } else {
+              fprintf(stdout, "WE HAVE GIVEN UP HERE, single object even after separation!!! Increase separating size and try again?\n");
+
             }
             // we need to make sure that label1 and label2 look ok now
 
-          }
+          //}
 
         }
 
+        // ok, if we did this right we should have now 2 separate regions of interest (left and right lung)
+        // input is no_trachea
+        ConnectedComponentImageFilterType::Pointer connected_final_mask = ConnectedComponentImageFilterType::New ();
+        connected_final_mask->SetInput( no_trachea );
+        connected_final_mask->Update();
+
+        // ToDo: we should check here which side is left/right to be able to name the lungs appropriately
+
+
+        // copy back the trachea to get a full label field
+        // the data is in regionGrowingField
+        ImageType::Pointer finalLabelField = connected_final_mask->GetOutput();
+        MaskImageType::RegionType tracheaRegion  = inputImage->GetLargestPossibleRegion();
+        itk::ImageRegionIterator<MaskImageType> tracheaIter(regionGrowingField,tracheaRegion);
+        itk::ImageRegionIterator<ImageType> labelIter(finalLabelField,tracheaRegion);
+        // we should also compute the size here (number of voxel per region)
+        size_t count_label1 = 0;
+        size_t count_label2 = 0;
+        size_t count_trachea = 0;
+        while (!tracheaIter.IsAtEnd() && !labelIter.IsAtEnd()) {
+          if (tracheaIter.Get() > 0) {
+            labelIter.Set(3);
+            count_trachea++;
+          }
+          if (labelIter.Get() == 1)
+            count_label1++;
+          if (labelIter.Get() == 2)
+            count_label2++;
+          ++tracheaIter;
+          ++labelIter;
+        }
+        resultJSON["lung_separated_count"] = json::array();
+        json l1;
+        l1["id"] = 1;
+        l1["label"] = "Lung1";
+        l1["count"] = count_label1;
+        l1["volume"] = count_label1 * spacingx * spacingy * spacingz * 1e-6;
+        resultJSON["lung_separated_count"].push_back(l1);
+        json l2;
+        l2["id"] = 2;
+        l2["label"] = "Lung2";
+        l2["count"] = count_label2;
+        l2["volume"] = count_label2 * spacingx * spacingy * spacingz * 1e-6;
+        resultJSON["lung_separated_count"].push_back(l2);
+        json l3;
+        l3["id"] = 3;
+        l3["trachea"] = "Trachea";
+        l3["count"] = count_trachea;
+        l3["volume"] = count_trachea * spacingx * spacingy * spacingz * 1e-6;
+        resultJSON["lung_separated_count"].push_back(l3);
+
         if (1) { // debug output 
-          typedef itk::ImageFileWriter< MaskImageType > WriterType;
+          typedef itk::ImageFileWriter< ImageType > WriterType;
           WriterType::Pointer writer = WriterType::New();
 
+          std::string a;
+          size_t lastdot = labelfieldfilename.find_last_of(".");
+          if (lastdot == std::string::npos) 
+            a = labelfieldfilename + "_separated.nii";
+          else
+            a = labelfieldfilename.substr(0, lastdot) + "_separated.nii";
+
           // std::string a(labelfieldfilename + "trachea.nii");
-          writer->SetFileName( "/tmp/no_trachea_separated.nii" );
-          writer->SetInput( no_trachea );
+          writer->SetFileName( a );
+          writer->SetInput( finalLabelField /* no_trachea */ );
       
-          std::cout  << "Writing the no trachea separated mask as " << std::endl;
-          std::cout  <<  "/tmp/no_trachea_separated.nii" << std::endl << std::endl;
+          std::cout  << "Writing the final mask as " << std::endl;
+          std::cout  <<  a << std::endl << std::endl;
+          resultJSON["label_field_separated"] = std::string(a);
 
           try  {
             writer->Update();
@@ -1218,7 +1361,383 @@ int main( int argc, char* argv[] ) {
           }
         }
 
+        gdcm::UIDGenerator fuid;
+        std::string frameOfReferenceUID = fuid.Generate();
 
+        /////////////////////////////////////////////////////////
+        // lets write a DICOM dataset for the labels as well
+        if (1) { 
+          gdcm::UIDGenerator suid;
+          std::string newSeriesUID = suid.Generate();
+  
+          // https://itk.org/Doxygen/html/Examples_2IO_2RGBImageSeriesReadWrite_8cxx-example.html
+          using CPixelType = itk::RGBPixel< unsigned char >;
+          using CImageType = itk::Image< CPixelType, Dimension >;
+          using CWriterType = itk::ImageFileWriter< CImageType >;
+          CImageType::Pointer fused  = CImageType::New();
+          CImageType::RegionType fusedRegion  = inputImage->GetLargestPossibleRegion();
+          fused->SetRegions(fusedRegion);
+          fused->Allocate();
+          fused->FillBuffer( itk::NumericTraits< CPixelType >::Zero );
+          fused->SetOrigin(inputImage->GetOrigin());
+          fused->SetSpacing(inputImage->GetSpacing());
+          fused->SetDirection(inputImage->GetDirection());
+
+          itk::ImageRegionIterator<ImageType> fusedLabelIterator(finalLabelField,fusedRegion);
+          itk::ImageRegionIterator<ImageType> inputIterator(inputImage,fusedRegion);
+          itk::ImageRegionIterator<CImageType> fusedIterator(fused,fusedRegion);
+          // now compute the fused image
+          // max value of input is?
+          using ImageCalculatorFilterType = itk::MinimumMaximumImageCalculator <ImageType>;
+          ImageCalculatorFilterType::Pointer imageCalculatorFilter = ImageCalculatorFilterType::New ();
+          imageCalculatorFilter->SetImage(inputImage);
+          imageCalculatorFilter->Compute();
+          int minGray = imageCalculatorFilter->GetMinimum();
+          int maxGray = imageCalculatorFilter->GetMaximum();
+          // what are good contrast and brightness values?
+          // compute a histogram first
+          using HistogramGeneratorType = itk::Statistics::ScalarImageToHistogramGenerator<ImageType>;
+          HistogramGeneratorType::Pointer histogramGenerator = HistogramGeneratorType::New();
+          histogramGenerator->SetInput( inputImage );
+          int histogramSize = 1024;
+          histogramGenerator->SetNumberOfBins( histogramSize );
+          histogramGenerator->SetHistogramMin( minGray );
+          histogramGenerator->SetHistogramMax( maxGray );
+          histogramGenerator->Compute();
+          using HistogramType = HistogramGeneratorType::HistogramType;
+          const HistogramType * histogram = histogramGenerator->GetOutput();
+          double lowerT = 0.01;
+          double upperT = 0.999;
+          double t1 = -1;
+          double t2 = -1;
+          double sum = 0;
+          double total = 0;
+          for (unsigned int bin=0; bin < histogramSize; bin++ ) {
+            total += histogram->GetFrequency( bin, 0 );
+          }
+          for (unsigned int bin=0; bin < histogramSize; bin++ ) {
+            double f = histogram->GetFrequency( bin, 0 ) / total;
+            //fprintf(stdout, "bin %d, value is %f\n", bin, f);
+            sum += f;
+            if (t1 == -1 && sum > lowerT) {
+              t1 = minGray + (maxGray-minGray)*(bin/(float)histogramSize);
+            }
+            if (t2 == -1 && sum > upperT) {
+              t2 = minGray + (maxGray-minGray)*(bin/(float)histogramSize);
+              break;
+            }
+          }
+          fprintf(stdout, "calculated best threshold low: %f, high: %f\n", t1, t2);
+
+          float f = 0.6;
+          while (!fusedLabelIterator.IsAtEnd() && !fusedIterator.IsAtEnd()) {
+            // is this a copy of do we really write the color here?
+            CPixelType value = fusedIterator.Value();
+            float scaledP = (inputIterator.Get() - t1)/(t2-t1);
+            float red = scaledP;
+            if (fusedLabelIterator.Get() == 3)
+              red = f*scaledP + (1-f)*(1);
+            float blue = scaledP;
+            if (fusedLabelIterator.Get() == 1)
+              blue = f*scaledP + (1-f)*(1);
+            float green = scaledP;
+            if (fusedLabelIterator.Get() == 2)
+               green = f*scaledP + (1-f)*(1);
+
+            red = std::min<float>(1, std::max<float>(0, red));
+            green = std::min<float>(1, std::max<float>(0, green));
+            blue = std::min<float>(1, std::max<float>(0, blue));
+            //fprintf(stdout, "red: %f, green: %f, blue: %f\n", red, green, blue);
+
+            value.SetRed((int)(red*255));
+            value.SetGreen((int)(green*255));
+            value.SetBlue((int)(blue*255));
+            fusedIterator.Set(value);
+
+            ++fusedIterator;
+            ++fusedLabelIterator;
+            ++inputIterator;
+          }
+          //fprintf(stdout, "PhotometricInterpretation is: %d\n", fused->GetPhotometricInterpretation());
+
+          CWriterType::Pointer cwriter       = CWriterType::New();
+          // https://github.com/malaterre/GDCM/blob/master/Examples/Cxx/CreateARGBImage.cxx
+
+          // create the output directory for the DICOM data
+          itksys::SystemTools::MakeDirectory( output );
+          outputSeries = output + "/" + seriesIdentifier + "_fused";
+          itksys::SystemTools::MakeDirectory( outputSeries );
+          //fprintf(stdout, "save data to %s\n", output.c_str());
+          std::cout  << "Writing fused label images to " << outputSeries << std::endl;
+          resultJSON["output_label_series"] = std::string(outputSeries);
+          resultJSON["output_label_images"] = json::array();
+          std::string newSeriesUID2 = suid.Generate();
+          // now read in each input file in a loop, copy the result data over and write out as DICOM
+          for (int i = 0; i < fileNames.size(); i++) {
+            //std::cout << "use slice: " << fileNames[i] << " as template for output" << std::endl;
+            fprintf(stdout, "start with %d of %lu\n", i, fileNames.size());
+            // this is 2D work
+            typedef signed short InputPixelType;
+            const unsigned int   Dimension = 2;
+            typedef itk::Image< InputPixelType, Dimension > InputImageType;
+
+            typedef itk::ImageFileReader< InputImageType > ReaderType;
+            ReaderType::Pointer reader = ReaderType::New();
+            reader->SetFileName( fileNames[i] );
+
+            typedef itk::GDCMImageIO           ImageIOType;
+            ImageIOType::Pointer gdcmImageIO = ImageIOType::New();
+            reader->SetImageIO( gdcmImageIO );
+        
+            try {
+                reader->Update();
+            } catch (itk::ExceptionObject & e) {
+                std::cerr << "exception in file reader " << std::endl;
+                std::cerr << e.GetDescription() << std::endl;
+                std::cerr << e.GetLocation() << std::endl;
+                return EXIT_FAILURE;
+            }
+            // ReaderType::DictionaryRawPointer inputDict = (*(reader->GetMetaDataDictionaryArray()))[0];        
+          
+            InputImageType::Pointer inputImage = reader->GetOutput();
+            InputImageType::RegionType region;
+            region = inputImage->GetBufferedRegion();
+            InputImageType::SizeType size  = region.GetSize();
+            // std::cout << "size is: " << size[0] << " " << size[1] << std::endl;
+
+            InputImageType::PixelContainer* container;
+            container = inputImage->GetPixelContainer();
+            container->SetContainerManageMemory( false );
+            unsigned int bla = sizeof(InputImageType::PixelType);
+            InputImageType::PixelType* buffer2 = container->GetBufferPointer();
+            
+            gdcm::PixelFormat pf = gdcm::PixelFormat::UINT8;
+            pf.SetSamplesPerPixel( 3 );
+            gdcm::SmartPointer< gdcm::Image > simage = new gdcm::Image;
+            gdcm::Image &                     image = *simage;
+            image.SetNumberOfDimensions(2);
+            typedef itk::Image< PixelType, 2 >         ImageType2D;
+            ImageType2D::RegionType inRegion = inputImage->GetLargestPossibleRegion();
+            image.SetDimension(0, static_cast<unsigned int>(inRegion.GetSize()[0]));
+            image.SetDimension(1, static_cast<unsigned int>(inRegion.GetSize()[1]));
+            //image.SetDimension(2, m_Dimensions[2] );
+            image.SetSpacing(0, inputImage->GetSpacing()[0]);
+            image.SetSpacing(1, inputImage->GetSpacing()[1]);
+
+            image.SetPixelFormat( pf );
+            gdcm::PhotometricInterpretation pi = gdcm::PhotometricInterpretation::RGB;
+            image.SetPhotometricInterpretation( pi );
+            image.SetTransferSyntax( gdcm::TransferSyntax::ExplicitVRLittleEndian );
+            // copy the DICOM tags over from inputImage to image
+            gdcm::DataElement pixeldata( gdcm::Tag(0x7fe0,0x0010) );
+            // get Pixel buffer from fused
+            CImageType::Pointer fusedNImage = fused;
+            CImageType::PixelContainer* container22 = fusedNImage->GetPixelContainer();
+            CImageType::PixelType* buffer22 = container22->GetBufferPointer();
+
+            // go into slice by applying offset
+            uint32_t len = inRegion.GetSize()[0] * inRegion.GetSize()[1] * 3 * sizeof(unsigned char);
+            pixeldata.SetByteValue( (char *)(((unsigned char *)buffer22)+i*len), len );
+            image.SetDataElement( pixeldata );
+
+            // now copy all the DICOM tags over
+            using DictionaryType = itk::MetaDataDictionary;
+            const  DictionaryType & dictionaryIn  = inputImage->GetMetaDataDictionary();
+            using MetaDataStringType = itk::MetaDataObject< std::string >;
+            auto itr = dictionaryIn.Begin();
+            auto end = dictionaryIn.End();
+//            itk::MetaDataDictionary outMetaData;
+
+            // create an image (see http://gdcm.sourceforge.net/html/GenFakeImage_8cxx-example.html#_a1)
+            gdcm::SmartPointer<gdcm::File> file = new gdcm::File; // empty file
+            gdcm::FileDerivation fd;
+            const char ReferencedSOPClassUID[] = "1.2.840.10008.5.1.4.1.1.7"; // Secondary Capture
+            fd.AddReference( ReferencedSOPClassUID, frameOfReferenceUID.c_str() );
+            fd.SetPurposeOfReferenceCodeSequenceCodeValue( 121324 ); // segmentation  (see https://github.com/malaterre/GDCM/blob/master/Source/MediaStorageAndFileFormat/gdcmFileDerivation.cxx)
+            // CID 7203 Image Derivation
+            // { "DCM",113072,"Multiplanar reformatting" },
+            fd.SetDerivationCodeSequenceCodeValue( 113076 );
+            fd.SetFile( *file );
+            // If all Code Value are ok the filter will execute properly
+            if ( !fd.Derive() ) {
+              std::cerr << "Sorry could not derive using input info" << std::endl;
+              return 1;
+            }
+            gdcm::DataSet &ds = fd.GetFile().GetDataSet();
+            gdcm::Anonymizer ano;
+            ano.SetFile(fd.GetFile());
+            std::string seriesDescription;
+            while (itr != end)
+            {
+              itk::MetaDataObjectBase::Pointer  entry = itr->second;
+              MetaDataStringType::Pointer entryvalue = dynamic_cast<MetaDataStringType *>( entry.GetPointer() );
+              if ( entryvalue ) {
+//                itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D", newSeriesUID );
+
+                // itk::EncapsulateMetaData<std::string>( dictionaryOut, entryId, value );
+                //gdcm::DataElement d( gdcm::Tag(0x7fe0,0x0010) );
+                //gdcm::Attribute<0x0020, 0x4000> imagecomments;
+                //imagecomments.SetValue("Hi");
+                // parse tagkey for tags, get comma separated
+
+
+                std::string tagkey   = itr->first;
+                std::string labelId;
+                bool found =  itk::GDCMImageIO::GetLabelFromTag( tagkey, labelId );
+                std::string tagvalue = entryvalue->GetMetaDataObjectValue();
+                if (strcmp(tagkey.c_str(), "0008|103e") == 0 ) {
+                  seriesDescription = tagvalue;
+                }
+                if (strcmp(tagkey.c_str(), "0020|1041") == 0 ) {
+                  // don't overwrite the slice position
+                  ++itr;
+                  continue;
+                }
+                // change window level from -400..600 to 150..180
+                if (strcmp(tagkey.c_str(), "0028|1050") == 0 ) {
+                  tagvalue = std::string("150");
+                }
+                if (strcmp(tagkey.c_str(), "0028|1051") == 0 ) {
+                  tagvalue = std::string("180");
+                }
+
+                unsigned int f1;
+                unsigned int f2;
+                sscanf(tagkey.c_str(), "%x|%x", &f1, &f2);
+                fprintf(stdout, "detected tags %4x %4x\n", f1, f2);
+
+                //gdcm::Attribute<f1, f2> at1; // all tag information from old dataset
+                //at1.SetValue( tagvalue.c_str() );
+                //ds.Replace( at1.GetAsDataElement() );
+                ano.Replace(gdcm::Tag(f1, f2), tagvalue.c_str());
+
+                //d.SetValue( tagvalue.c_str() );
+                //image.SetDataElement( d );
+               if( found ) {
+                  std::cout << "(" << tagkey << ") " << labelId;
+                  std::cout << " = " << tagvalue.c_str() << std::endl;
+                } else {
+                  std::cout << "(" << tagkey <<  ") " << "Unknown";
+                  std::cout << " = " << tagvalue.c_str() << std::endl;
+                }
+              }
+              ++itr;
+            }
+//            itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D", newSeriesUID );
+//            image.SetMetaDataDictionary( outMetaData );
+
+            // For the pupose of this execise we will pretend that this image is referencing
+            // two source image (we need to generate fake UID for that).
+            // move this inside the loop above to copy values over
+            gdcm::Attribute<0x0008,0x2111> at1; // Derivative Description
+            at1.SetValue( "Segmented Lung - Stage 1" );
+            ds.Replace( at1.GetAsDataElement() );
+
+            gdcm::Attribute<0x0008,0x0060> at2; // Derivative Description
+            at2.SetValue( "CT" );
+            ds.Replace( at2.GetAsDataElement() );
+
+            gdcm::Attribute<0x0020, 0x000E> at3;
+            at3.SetValue(newSeriesUID2);
+            ds.Replace( at3.GetAsDataElement() );
+
+            gdcm::Attribute<0x0008, 0x103E> at4;
+            at4.SetValue(seriesDescription + " (fused segmentation)");
+            ds.Replace( at4.GetAsDataElement() );
+
+
+            gdcm::ImageWriter writer;
+            writer.SetImage( image );
+            writer.SetFile( fd.GetFile() );
+            char pp[2048];
+            sprintf(pp, "%s/dicom%d.dcm", outputSeries.c_str(), i);
+            std::string fname(pp);
+            //std::ostringstream o;
+            //o << outputSeries << "/dicom" << i << ".dcm";
+            writer.SetFileName( fname.c_str() );
+            if ( !writer.Write() ) {
+              return 1;
+            }
+            // here the only thing I can do right now is to write these files temporarily 
+            // and to read them back in as itk image, atach header and write again
+
+
+
+            // we should take the image data from fused instead and make the image RGB
+/*             ImageType::Pointer nImage = final;
+            InputImageType::PixelContainer* container2 = nImage->GetPixelContainer();
+            InputImageType::PixelType* buffer3 = container2->GetBufferPointer();
+          
+            memcpy(buffer2, &(buffer3[i*size[0]*size[1]]), size[0]*size[1]*bla);
+          
+            typedef itk::MetaDataDictionary DictionaryType;
+            DictionaryType & dictionary = inputImage->GetMetaDataDictionary();
+          
+            std::string studyUID;
+            std::string sopClassUID;
+            itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
+            itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
+            gdcmImageIO->KeepOriginalUIDOn();
+
+            gdcm::UIDGenerator sopuid;
+            std::string sopInstanceUID = sopuid.Generate();
+                  
+            //std::string entryId( "0008|103e" );
+            //std::string value( "Intensity Corrected" );
+            //itk::EncapsulateMetaData<std::string>( dictionary, entryId, value );
+  
+            //DictionaryType *dict = new DictionaryType();
+  
+            // Copy the dictionary from the first slice
+            //CopyDictionary (dictionary, *dict);
+    
+            // Set the UID's for the study, series, SOP  and frame of reference
+    
+            itk::EncapsulateMetaData<std::string>(dictionary,"0020|000d", studyUID);
+            itk::EncapsulateMetaData<std::string>(dictionary,"0020|000e", newSeriesUID);
+            itk::EncapsulateMetaData<std::string>(dictionary,"0020|0052", frameOfReferenceUID);
+
+            // these keys don't exist - results in error
+            //itk::EncapsulateMetaData<std::string>(dictionary,"0020|0052", "0"); // Intercept
+            //itk::EncapsulateMetaData<std::string>(dictionary,"0020|0053", "1"); // Slope
+
+            std::string oldSeriesDesc;
+            itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
+  
+            std::ostringstream value;
+            value.str("");
+            value << oldSeriesDesc  << " (lung fused)";
+            // This is a long string and there is a 64 character limit in the
+            // standard
+            unsigned lengthDesc = value.str().length();
+    
+            std::string seriesDesc( value.str(), 0,
+                                lengthDesc > 64 ? 64
+                                : lengthDesc);
+            itk::EncapsulateMetaData<std::string>(dictionary,"0008|103e", seriesDesc);
+
+            // set a lung window -600 ... 1600
+            itk::EncapsulateMetaData<std::string>(dictionary,"0028|1051", std::to_string(1400));
+            itk::EncapsulateMetaData<std::string>(dictionary,"0028|1050", std::to_string(-500));
+      
+            // copy the values for this slice over
+            //CopyDictionary (*dict, dictionary);
+          
+            // write out the result as a DICOM again
+            typedef itk::ImageFileWriter< InputImageType >  Writer1Type;
+            Writer1Type::Pointer writer1 = Writer1Type::New();
+          
+            writer1->SetInput( inputImage );
+            std::ostringstream o;
+            o << outputSeries << "/dicom" << i << ".dcm";
+            writer1->SetFileName( o.str() );
+            writer1->SetImageIO( gdcmImageIO );
+            writer1->Update();
+            //std::cout << "done with writing the image...";
+            */
+            resultJSON["output_label_images"].push_back(fname);
+          }
+        } // loop over series
 
           if (0)
           {
@@ -1503,8 +2022,8 @@ int main( int argc, char* argv[] ) {
         // now save as DICOM
         gdcm::UIDGenerator suid;
         std::string newSeriesUID = suid.Generate();
-        gdcm::UIDGenerator fuid;
-        std::string frameOfReferenceUID = fuid.Generate();
+        // frameOfReference as been defined below
+        // std::string frameOfReferenceUID = fuid.Generate();
  
         // create the output directory for the DICOM data
         itksys::SystemTools::MakeDirectory( output );
