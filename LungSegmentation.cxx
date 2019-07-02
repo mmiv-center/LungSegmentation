@@ -1604,7 +1604,7 @@ int main( int argc, char* argv[] ) {
                 unsigned int f1;
                 unsigned int f2;
                 sscanf(tagkey.c_str(), "%x|%x", &f1, &f2);
-                fprintf(stdout, "detected tags %4x %4x\n", f1, f2);
+                //fprintf(stdout, "detected tags %4x %4x\n", f1, f2);
 
                 //gdcm::Attribute<f1, f2> at1; // all tag information from old dataset
                 //at1.SetValue( tagvalue.c_str() );
@@ -1613,13 +1613,13 @@ int main( int argc, char* argv[] ) {
 
                 //d.SetValue( tagvalue.c_str() );
                 //image.SetDataElement( d );
-               if( found ) {
+                /* if( found ) {
                   std::cout << "(" << tagkey << ") " << labelId;
                   std::cout << " = " << tagvalue.c_str() << std::endl;
                 } else {
                   std::cout << "(" << tagkey <<  ") " << "Unknown";
                   std::cout << " = " << tagvalue.c_str() << std::endl;
-                }
+                }*/
               }
               ++itr;
             }
@@ -1735,7 +1735,9 @@ int main( int argc, char* argv[] ) {
             writer1->Update();
             //std::cout << "done with writing the image...";
             */
-            resultJSON["output_label_images"].push_back(fname);
+            // more conservative with information (only first and last in output)
+            if (i == 0 || i == fileNames.size()-1)
+              resultJSON["output_label_images"].push_back(fname);
           }
         } // loop over series
 
