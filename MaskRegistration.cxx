@@ -70,6 +70,14 @@
 
 #include "itkHistogramMatchingImageFilter.h"
 #include "itkCastImageFilter.h"
+#include "json.hpp"
+#include <boost/filesystem.hpp>
+
+#include "itkDisplacementFieldJacobianDeterminantFilter.h"
+
+
+using json = nlohmann::json;
+using namespace boost::filesystem;
 
 //  The following section of code implements a Command observer
 //  used to monitor the evolution of the registration process.
@@ -103,10 +111,12 @@ public:
     std::cout << std::endl;
     }
 };
-int main( int argc, char *argv[] )
-{
-  if( argc < 4 )
-    {
+
+
+json resultJSON;
+
+int main( int argc, char *argv[] ) {
+  if ( argc < 4 ) {
     std::cerr << "Missing Parameters " << std::endl;
     std::cerr << "Usage: " << argv[0];
     std::cerr << " fixedImageFile  movingImageFile outputImagefile  ";
@@ -119,7 +129,13 @@ int main( int argc, char *argv[] )
     std::cerr << " [maximumStepLength] [maximumNumberOfIterations]";
     std::cerr << std::endl;
     return EXIT_FAILURE;
-    }
+  }
+
+  resultJSON["command_line"] = json::array();
+  for (int i = 0; i < argc; i++) {
+    resultJSON["command_line"].push_back(std::string(argv[i]));
+  }
+
   constexpr unsigned int ImageDimension = 3;
   using PixelType = signed short;
   using FixedImageType = itk::Image< PixelType, ImageDimension >;
@@ -146,7 +162,7 @@ int main( int argc, char *argv[] )
                                         RigidTransformType,
                                         InternalImageType, InternalImageType >;
   using OptimizerType = itk::RegularStepGradientDescentOptimizer;
-  using MetricType = itk::MeanSquaresImageToImageMetric< // itk::MattesMutualInformationImageToImageMetric<
+  using MetricType = /*  itk::MeanSquaresImageToImageMetric< */ itk::MattesMutualInformationImageToImageMetric<
                                     InternalImageType,
                                     InternalImageType >;
   using InterpolatorType = itk:: LinearInterpolateImageFunction<
@@ -174,8 +190,9 @@ int main( int argc, char *argv[] )
   MovingImageReaderType::Pointer movingImageReader = MovingImageReaderType::New();
   fixedImageReader->SetFileName(  argv[1] );
   movingImageReader->SetFileName( argv[2] );
+  resultJSON["series_identifier"] = argv[1];
   try
-    {
+  {
     fixedImageReader->Update();
     movingImageReader->Update();
     }
@@ -225,7 +242,7 @@ int main( int argc, char *argv[] )
   movingImage->SetSpacing(movingImageReader->GetOutput()->GetSpacing());
   movingImage->SetDirection(movingImageReader->GetOutput()->GetDirection());
 
-  fprintf(stdout, "fixed image caster voxel size is: %f %f %f\n", fixedImageCaster->GetOutput()->GetSpacing()[0], 
+/*   fprintf(stdout, "fixed image caster voxel size is: %f %f %f\n", fixedImageCaster->GetOutput()->GetSpacing()[0], 
         fixedImageCaster->GetOutput()->GetSpacing()[1], 
         fixedImageCaster->GetOutput()->GetSpacing()[2]);
   fprintf(stdout, "fixed image caster origin is: %f %f %f\n", 
@@ -238,7 +255,7 @@ int main( int argc, char *argv[] )
         movingImageCaster->GetOutput()->GetSpacing()[2]);
   fprintf(stdout, "moving image caster origin is: %f %f %f\n", movingImageCaster->GetOutput()->GetOrigin()[0], 
         movingImageCaster->GetOutput()->GetOrigin()[1], 
-        movingImageCaster->GetOutput()->GetOrigin()[2]);
+        movingImageCaster->GetOutput()->GetOrigin()[2]); */
 
 /*        regionGrowingField->SetOrigin(inputImage->GetOrigin());
         regionGrowingField->SetSpacing(inputImage->GetSpacing());
@@ -256,7 +273,9 @@ int main( int argc, char *argv[] )
   //
   // Setup the metric parameters
   //
-//  metric->SetNumberOfHistogramBins( 50 );
+  metric->SetNumberOfHistogramBins( 50 );
+  resultJSON["number_of_histogram_bins"] = 50;
+
   FixedImageType::RegionType fixedRegion = fixedImage->GetBufferedRegion();
   const unsigned int numberOfPixels = fixedRegion.GetNumberOfPixels();
   metric->ReinitializeSeed( 76926294 );
@@ -340,6 +359,11 @@ int main( int argc, char *argv[] )
               << registration->GetOptimizer()->GetStopConditionDescription()
               << registration->GetLastTransformParameters()
               << std::endl;
+    std::ostringstream o;
+    o << registration->GetLastTransformParameters();
+    resultJSON["rigid_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
+    resultJSON["rigid_transform"] = o.str();
+    
     }
   catch( itk::ExceptionObject & err )
     {
@@ -375,9 +399,9 @@ int main( int argc, char *argv[] )
   optimizer->SetScales( optimizerScales );
   optimizer->SetMaximumStepLength( 0.1000  );
   optimizer->SetMinimumStepLength( 0.00001 );
-  optimizer->SetNumberOfIterations( 400 );
+  optimizer->SetNumberOfIterations( 20 );
   //
-  // The Affine transform has 12 parameters we use therefore a more samples to run
+  // The Affine transform has 12 parameters we use therefore more samples to run
   // this stage.
   //
   // Regulating the number of samples in the Metric is equivalent to performing
@@ -392,6 +416,12 @@ int main( int argc, char *argv[] )
     registration->Update();
     chronometer.Stop( "Affine Registration" );
     memorymeter.Stop( "Affine Registration" );
+
+    std::ostringstream o;
+    o << registration->GetLastTransformParameters();
+    resultJSON["affine_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
+    resultJSON["affine_transform"] = o.str();
+
     }
   catch( itk::ExceptionObject & err )
     {
@@ -498,7 +528,10 @@ int main( int argc, char *argv[] )
   optimizer->SetMinimumStepLength(  0.01 );
 
   optimizer->SetRelaxationFactor( 0.7 );
-  optimizer->SetNumberOfIterations( 50 );
+  optimizer->SetNumberOfIterations( 20 );
+  resultJSON["optimizer_number_iterations"] = 20;
+
+
   // Software Guide : EndCodeSnippet
 
 
@@ -523,6 +556,7 @@ int main( int argc, char *argv[] )
   // multi-resolution registration because it is indeed a sub-sampling of the
   // image.
   metric->SetNumberOfSpatialSamples( numberOfBSplineParameters * 100 );
+  resultJSON["optimizer_number_of_samples"] = numberOfBSplineParameters * 100;
 
   std::cout << std::endl << "Starting Deformable Registration Coarse Grid" << std::endl;
 
@@ -538,7 +572,10 @@ int main( int argc, char *argv[] )
     chronometer.Stop( "Deformable Registration Coarse" );
     memorymeter.Stop( "Deformable Registration Coarse" );
 
-
+    std::ostringstream o;
+    o << registration->GetLastTransformParameters();
+    resultJSON["elastic_coarse_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
+    resultJSON["elastic_coarse_transform"] = o.str();
     } 
   catch( itk::ExceptionObject & err ) 
     { 
@@ -565,7 +602,7 @@ int main( int argc, char *argv[] )
 
   DeformableTransformType::Pointer  bsplineTransformFine = DeformableTransformType::New();
 
-  unsigned int numberOfGridNodesInOneDimensionFine = 20;
+  unsigned int numberOfGridNodesInOneDimensionFine = 10;
 
   if( argc > 11 )
     {
@@ -702,6 +739,11 @@ int main( int argc, char *argv[] )
     registration->Update();
     chronometer.Stop( "Deformable Registration Fine" );
     memorymeter.Stop( "Deformable Registration Fine" );
+
+    std::ostringstream o;
+    o << registration->GetLastTransformParameters();
+    resultJSON["elastic_fine_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
+    resultJSON["elastic_fine_transform"] = o.str();
 
 //    itkProbesStart( "Deformable Registration Fine" );
 //    registration->StartRegistration(); 
@@ -971,7 +1013,7 @@ int main( int argc, char *argv[] )
   // regression testing in this example. However, for didactic
   // exercise it will be better to set it to a medium gray value
   // such as 100 or 128.
-  resample->SetDefaultPixelValue( 0 );
+  resample->SetDefaultPixelValue( -1024 );
   using OutputPixelType = signed short;
   using OutputImageType = itk::Image< OutputPixelType, ImageDimension >;
   using CastFilterType = itk::CastImageFilter<
@@ -981,6 +1023,11 @@ int main( int argc, char *argv[] )
   WriterType::Pointer      writer =  WriterType::New();
   CastFilterType::Pointer  caster =  CastFilterType::New();
   writer->SetFileName( argv[3] );
+  // create the path if it does not exist
+  path p(argv[3]);
+  create_directories(p.parent_path());
+  resultJSON["resampled_moving_image"] = argv[3];
+
   caster->SetInput( resample->GetOutput() );
   writer->SetInput( caster->GetOutput()   );
   std::cout << "Writing resampled moving image...";
@@ -995,15 +1042,16 @@ int main( int argc, char *argv[] )
     return EXIT_FAILURE;
     }
   std::cout << " Done!" << std::endl;
+  resultJSON["resampled_moving_image"] = argv[3];
   using DifferenceFilterType = itk::SquaredDifferenceImageFilter<
                                   InternalImageType,
                                   InternalImageType,
-                                  OutputImageType >;
+                                  InternalImageType >;
   DifferenceFilterType::Pointer difference = DifferenceFilterType::New();
-  using SqrtFilterType = itk::SqrtImageFilter<OutputImageType, OutputImageType>;
+  using SqrtFilterType = itk::SqrtImageFilter<InternalImageType, InternalImageType>;
   SqrtFilterType::Pointer sqrtFilter = SqrtFilterType::New();
   sqrtFilter->SetInput(difference->GetOutput());
-  using DifferenceImageWriterType = itk::ImageFileWriter< OutputImageType >;
+  using DifferenceImageWriterType = itk::ImageFileWriter< InternalImageType >;
   DifferenceImageWriterType::Pointer writer2 = DifferenceImageWriterType::New();
   writer2->SetInput(sqrtFilter->GetOutput());
   // Compute the difference image between the
@@ -1013,6 +1061,12 @@ int main( int argc, char *argv[] )
     difference->SetInput1( fixedImageCaster->GetOutput() );
     difference->SetInput2( resample->GetOutput() );
     writer2->SetFileName( argv[4] );
+
+    // create the path if it does not exist
+    path p(argv[4]);
+    create_directories(p.parent_path());
+    resultJSON["difference_image_after_elastic"] = argv[4];
+
     std::cout << "Writing difference image after registration...";
     try
       {
@@ -1027,13 +1081,20 @@ int main( int argc, char *argv[] )
     std::cout << " Done!" << std::endl;
     }
   // Compute the difference image between the
-  // fixed and moving image before registration.
+  // affine registered and elastic registered image.
   if( argc > 5 )
     {
     writer2->SetFileName( argv[5] );
+
+    // create the path if it does not exist
+    path p(argv[5]);
+    create_directories(p.parent_path());
+
     difference->SetInput1( fixedImageCaster->GetOutput() );
-    resample->SetTransform( identityTransform );
-    std::cout << "Writing difference image before registration...";
+    resample->SetTransform( affineTransform );
+    std::cout << "Writing difference image before elastic registration...";
+    resultJSON["difference_image_before_elastic"] = argv[5];
+
     try
       {
       writer2->Update();
@@ -1048,9 +1109,9 @@ int main( int argc, char *argv[] )
     }
   // Generate the explicit deformation field resulting from
   // the registration.
-  if( argc > 9 )
-    {
-    using VectorType = itk::Vector< float, ImageDimension >;
+  if ( argc > 9 ) {
+    std::cout << "Create displacement field for export... ";
+    using VectorType = itk::Vector<float, ImageDimension>;
     using DisplacementFieldType = itk::Image< VectorType, ImageDimension >;
     DisplacementFieldType::Pointer field = DisplacementFieldType::New();
     field->SetRegions( fixedRegion );
@@ -1074,12 +1135,19 @@ int main( int argc, char *argv[] )
       fi.Set( displacement );
       ++fi;
       }
-    using FieldWriterType = itk::ImageFileWriter< DisplacementFieldType >;
-    FieldWriterType::Pointer fieldWriter = FieldWriterType::New();
-    fieldWriter->SetInput( field );
-    fieldWriter->SetFileName( argv[9] );
-    std::cout << "Writing deformation field ...";
-    try
+      std::cout << "Done!" << std::endl;
+      using FieldWriterType = itk::ImageFileWriter<DisplacementFieldType>;
+      FieldWriterType::Pointer fieldWriter = FieldWriterType::New();
+      fieldWriter->SetInput(field);
+      fieldWriter->SetFileName(argv[9]);
+      resultJSON["deformation_field"] = argv[9];
+
+      // create the path if it does not exist
+      path p(argv[9]);
+      create_directories(p.parent_path());
+
+      std::cout << "Writing deformation field ...";
+      try
       {
       fieldWriter->Update();
       }
@@ -1090,17 +1158,72 @@ int main( int argc, char *argv[] )
       return EXIT_FAILURE;
       }
     std::cout << " Done!" << std::endl;
+
+    // we should write out the Jacobian of the deformation field as well
+    // we can use this filter: itkDisplacementFieldJacobianDeterminantFilter.h
+    // deformation field is: field
+    if (1) {
+      using JacobianFilterType = itk::DisplacementFieldJacobianDeterminantFilter<
+        DisplacementFieldType,
+        float,
+        InternalImageType>;
+      JacobianFilterType::Pointer  computeJacobian = JacobianFilterType::New();
+      computeJacobian->SetInput(field);
+      typedef itk::ImageFileWriter< InternalImageType > WriterType;
+      WriterType::Pointer writer = WriterType::New();
+
+      std::string ofn = std::string(argv[9]);
+      std::string ofn2 = ofn;
+      size_t lastdot = ofn.find_last_of(".");
+      if (lastdot == std::string::npos)
+        ofn2 = ofn + "_walls.nii";
+      else
+        ofn2 = ofn.substr(0, lastdot) + "_jacobian.nii"; 
+      std::string volFileName = ofn2;
+      path p(volFileName);
+      create_directories(p.parent_path());
+
+      // std::string a(labelfieldfilename + "trachea.nii");
+      writer->SetFileName( volFileName );
+      writer->SetInput( computeJacobian->GetOutput() );
+      
+      std::cout  << "Writing the jacobian scalar image as " << std::endl;
+      std::cout  <<  volFileName << std::endl << std::endl;
+      resultJSON["jacobian"] = volFileName;
+
+      try  {
+        writer->Update();
+      } catch (itk::ExceptionObject &ex) {
+        std::cout << ex << std::endl;
+        return EXIT_FAILURE;
+      }
     }
+
+  }
   // Optionally, save the transform parameters in a file
-  if( argc > 6 )
-    {
+  if( argc > 6 ) {
     std::cout << "Writing transform parameter file ...";
     using TransformWriterType = itk::TransformFileWriter;
     TransformWriterType::Pointer transformWriter = TransformWriterType::New();
     transformWriter->AddTransform(bsplineTransformFine);
     transformWriter->SetFileName(argv[6]);
+    resultJSON["transform_parameter_file"] = argv[6];
     transformWriter->Update();
     std::cout << " Done!" << std::endl;
-    }
+  }
+
+  std::string res = resultJSON.dump(4) + "\n";
+  std::ostringstream o;
+  std::string si(resultJSON["series_identifier"]);
+  si.erase(std::remove(si.begin(), si.end(), '\"'), si.end());
+  boost::filesystem::path p2(argv[3]);
+  //std::string output = p.parent_path();
+  o << p2.parent_path() << "/" << si << ".json";
+  std::ofstream out(o.str());
+  out << res;
+  out.close();
+
+  fprintf(stdout, "%s", res.c_str());
+
   return EXIT_SUCCESS;
 }

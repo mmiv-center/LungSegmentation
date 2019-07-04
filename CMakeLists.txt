@@ -32,4 +32,4 @@ add_executable(LungSegmentation LungSegmentation.cxx )
 target_link_libraries(LungSegmentation  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
 
 add_executable(MaskRegistration MaskRegistration.cxx )
-target_link_libraries(MaskRegistration  ${ITK_LIBRARIES})
+target_link_libraries(MaskRegistration  ${ITK_LIBRARIES} ${Boost_LIBRARIES})

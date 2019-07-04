@@ -1,4 +1,6 @@
-// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5489231/
+// Nice map of lung segments:
+//    https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5489231/
+
 #include "itkGDCMImageIO.h"
 #include "itkGDCMSeriesFileNames.h"
 #include "itkSmoothingRecursiveGaussianImageFilter.h"
@@ -466,9 +468,6 @@ int main( int argc, char* argv[] ) {
              return EXIT_FAILURE;
            }
         }
-
-
-
 
         typedef itk::BinaryFillholeImageFilter< SliceFilterType::InternalInputImageType > HoleFillFilterType;    
         HoleFillFilterType::Pointer holefillfilter = HoleFillFilterType::New();
@@ -1361,6 +1360,57 @@ int main( int argc, char* argv[] ) {
           }
         }
 
+        // write the original intensity image again only in the area where we have a label (>0)
+        // this should replace the previous extracted lung image because that one does not separate the lungs
+        ImageType::Pointer lungDensity  = ImageType::New();
+        ImageType::RegionType lungDensityRegion  = inputImage->GetLargestPossibleRegion();
+        lungDensity->SetRegions(lungDensityRegion);
+        lungDensity->Allocate();
+        lungDensity->FillBuffer( -1024 ); // density for air
+        lungDensity->SetOrigin(inputImage->GetOrigin());
+        lungDensity->SetSpacing(inputImage->GetSpacing());
+        lungDensity->SetDirection(inputImage->GetDirection());
+        itk::ImageRegionIterator<ImageType> labelIterator(finalLabelField,lungDensityRegion);
+        itk::ImageRegionIterator<ImageType> lungDensityIterator(inputImage,lungDensityRegion);
+        itk::ImageRegionIterator<ImageType> lungDensityOutIterator(lungDensity,lungDensityRegion);
+        while (!labelIterator.IsAtEnd() && !lungDensityIterator.IsAtEnd()) {
+          // is this a copy of do we really write the color here?
+          PixelType value = labelIterator.Value();
+          if (value > 0) {
+            lungDensityOutIterator.Set(lungDensityIterator.Get());
+          }
+          ++labelIterator;
+          ++lungDensityIterator;
+          ++lungDensityOutIterator;
+        }
+
+        if (saveNifty) {
+          typedef itk::ImageFileWriter< ImageType > WriterType;
+          WriterType::Pointer writer = WriterType::New();
+
+          std::string volFileName = output + "/" + seriesIdentifier + ".nii";
+          path p(volFileName);
+          create_directories(p.parent_path());
+
+          // std::string a(labelfieldfilename + "trachea.nii");
+          writer->SetFileName( volFileName );
+          writer->SetInput( lungDensity /* no_trachea */ );
+      
+          std::cout  << "Writing the lung density image as " << std::endl;
+          std::cout  <<  volFileName << std::endl << std::endl;
+          resultJSON["lung_intensity"] = volFileName;
+
+          try  {
+            writer->Update();
+          } catch (itk::ExceptionObject &ex) {
+            std::cout << ex << std::endl;
+            return EXIT_FAILURE;
+          }
+
+        }
+
+
+
         gdcm::UIDGenerator fuid;
         std::string frameOfReferenceUID = fuid.Generate();
 
@@ -1948,13 +1998,12 @@ int main( int argc, char* argv[] ) {
                         << std::endl;
               resultJSON["lung_intensity"] = std::string(volFileName);
 
-              try
-              {
-                writer->Update();
+              try {
+                  writer->Update();
               } catch (itk::ExceptionObject &ex) {
-              std::cout << ex << std::endl;
-              return EXIT_FAILURE;
-            }
+                std::cout << ex << std::endl;
+                return EXIT_FAILURE;
+              }
 
             // and again
             writer = WriterType::New();
@@ -1998,7 +2047,7 @@ int main( int argc, char* argv[] ) {
           }
         }
 
-        if (saveNifty) {
+        if (0 /* saveNifty */) { // don't save this because its not with lungs separated
             typedef itk::ImageFileWriter< ImageType > WriterType;
             WriterType::Pointer writer = WriterType::New();      
 
