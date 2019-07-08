@@ -137,7 +137,7 @@ json resultJSON;
 
 int main(int argc, char *argv[]) {
 
-  itk::MultiThreader::SetGlobalMaximumNumberOfThreads(4);
+  itk::MultiThreaderBase::SetGlobalMaximumNumberOfThreads(4);
 
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
@@ -1847,7 +1847,7 @@ int main(int argc, char *argv[]) {
             maxS = a;
           ++it;
         }
-        fprintf(stdout, "maxS : %f\n", maxS);
+        // fprintf(stdout, "maxS : %f\n", maxS);
         double ce = maxS / 2.0;
 
         it.GoToBegin();

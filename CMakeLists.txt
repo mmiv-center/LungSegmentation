@@ -4,8 +4,10 @@ if(COMMAND CMAKE_POLICY)
   cmake_policy(SET CMP0003 NEW)
 endif()
 
-set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-4.8.1/bin)
-SET(CMAKE_CXX_FLAGS "-std=c++0x")
+#set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-4.8.1/bin)
+set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-5.0.0/bin)
+#SET(CMAKE_CXX_FLAGS "-std=c++0x")
+SET(CMAKE_CXX_FLAGS "-std=c++11")
 
 project(LungSegmentation)
 
@@ -19,7 +21,7 @@ project(LungSegmentation)
 
 # Boost
 set(boost_min_ver 1.50.0)
-set(boost_libs system filesystem)
+set(boost_libs system filesystem timer)
 find_package(Boost ${boost_min_ver})
 
 if(Boost_FOUND)

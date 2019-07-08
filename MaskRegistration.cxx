@@ -1,6 +1,9 @@
 // set threads with
 // ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=6 ./MaskRegistration ...
 
+// ./MaskRegistration longData/049300006_049300006_seg/1.2.840.113654.2.3.1995.3.0.6.2017062709435100771.6151251220170622.nii
+// longData/0493_00006_0493_00006_seg/1.2.840.113654.2.3.1995.3.0.6.2017053107400100715.101.051251220170523.nii longData/reg/volume.nii
+
 /*=========================================================================
  *
  *  Copyright Insight Software Consortium
@@ -66,17 +69,23 @@
 #include "itkSqrtImageFilter.h"
 #include "itkSquaredDifferenceImageFilter.h"
 #include "itkTransformFileWriter.h"
+#include <itkImageMaskSpatialObject.h>
 
 #include "itkCastImageFilter.h"
 #include "itkHistogramMatchingImageFilter.h"
 #include "json.hpp"
 #include "metaCommand.h"
+
+//#include <cmath>
 #include <boost/filesystem.hpp>
+#include <boost/timer/timer.hpp>
 
 #include "itkDisplacementFieldJacobianDeterminantFilter.h"
 
 using json = nlohmann::json;
 using namespace boost::filesystem;
+using namespace boost::timer;
+bool verbose = false;
 
 //  The following section of code implements a Command observer
 //  used to monitor the evolution of the registration process.
@@ -101,9 +110,11 @@ public:
     if (!(itk::IterationEvent().CheckEvent(&event))) {
       return;
     }
-    std::cout << optimizer->GetCurrentIteration() << "   ";
-    std::cout << optimizer->GetValue() << "   ";
-    std::cout << std::endl;
+    if (verbose) {
+      std::cout << optimizer->GetCurrentIteration() << "   ";
+      std::cout << optimizer->GetValue() << "   ";
+      std::cout << std::endl;
+    }
   }
 };
 
@@ -111,45 +122,52 @@ json resultJSON;
 
 int main(int argc, char *argv[]) {
 
+  itk::MultiThreaderBase::SetGlobalMaximumNumberOfThreads(4);
+
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
-  command.SetDescription("Registration of intensity images");
-  command.AddField("fixedImageFile", "The fixed input image", MetaCommand::STRING, true);
-  command.AddField("movingImageFile", "The moving input image", MetaCommand::STRING, true);
-  command.AddField("outputImageFile", "Output image file after elastic registration", MetaCommand::STRING, true);
+  command.SetName("Registration");
+  command.SetDescription("Registration of intensity images based on the ITK toolkit.");
+  command.SetVersion("0.0.1");
+  command.AddField("fixedImageFile", "The fixed image", MetaCommand::STRING, true);
+  command.AddField("movingImageFile", "The moving image", MetaCommand::STRING, true);
+  command.AddField("outputImageFile", "Output moving image after elastic registration with fixed image.", MetaCommand::STRING, true);
 
-  command.SetOption("fixedImageMaskFile", "mask", false, "Specify a mask for the fixed image.");
-  command.AddOptionField("fixedImageMaskFile", "mask", MetaCommand::STRING, false);
+  command.SetOption("fixedImageMaskFile", "m", false, "Specify a mask for the fixed image.");
+  command.AddOptionField("fixedImageMaskFile", "mask", MetaCommand::STRING, true);
 
-  command.SetOption("differenceOutputFile", "diff", false, "Export the difference image.");
-  command.AddOptionField("differenceOutputFile", "difference", MetaCommand::STRING, false);
+  command.SetOption("differenceOutputFile", "i", false, "Export the difference image.");
+  command.AddOptionField("differenceOutputFile", "differenceOutputFile", MetaCommand::STRING, true);
 
-  command.SetOption("differenceBeforeRegistration", "diffbefore", false, "Export the difference image before elastic registration.");
-  command.AddOptionField("differenceBeforeRegistration", "differenceBefore", MetaCommand::STRING, false);
+  command.SetOption("differenceBeforeRegistration", "b", false, "Export the difference image before elastic registration to this file.");
+  command.AddOptionField("differenceBeforeRegistration", "differenceBeforeRegistration", MetaCommand::STRING, true);
 
-  command.SetOption("filenameForFinalTransformParameter", "transform", false, "Export the transform as a file.");
-  command.AddOptionField("filenameForFinalTransformParameter", "transform", MetaCommand::STRING, false);
+  command.SetOption("filenameForFinalTransformParameter", "t", false, "Export the transform as a file.");
+  command.AddOptionField("filenameForFinalTransformParameter", "filenameForFinalTransformParameter", MetaCommand::STRING, true);
 
-  command.SetOption("useExplicitPDFderivatives", "explicitPDF", false, "Use explicit PDF derivatives.");
+  command.SetOption("useExplicitPDFderivatives", "e", false, "Use explicit PDF derivatives.");
 
-  command.SetOption("useCachingBSplineWeights", "cachingWeights", false, "Use caching of weights.");
+  command.SetOption("useCachingBSplineWeights", "c", false, "Use caching of weights.");
 
-  command.SetOption("deformationField", "df", false, "Export the deformation field.");
-  command.AddOptionField("deformationField", "deformation", MetaCommand::STRING, false);
+  command.SetOption("deformationField", "d", false, "Export the deformation field.");
+  command.AddOptionField("deformationField", "deformationField", MetaCommand::STRING, true);
 
-  command.SetOption("numberOfGridNodesInsideImageInOneDimensionCoarse", "gnc", false, "Number of grid nodes in coarse sampling.");
-  command.AddOptionField("numberOfGridNodesInsideImageInOneDimensionCoarse", "gnc", MetaCommand::INT, false, "5");
+  command.SetOption("numberOfGridNodesInsideImageInOneDimensionCoarse", "c", false, "Number of grid nodes in coarse sampling.");
+  command.AddOptionField("numberOfGridNodesInsideImageInOneDimensionCoarse", "numberOfGridNodesInsideImageInOneDimensionCoarse", MetaCommand::INT, true, "5");
 
-  command.SetOption("numberOfGridNodesInsideImageInOneDimensionFine", "gnf", false, "Number of grid nodes in fine sampling.");
-  command.AddOptionField("numberOfGridNodesInsideImageInOneDimensionFine", "gnf", MetaCommand::INT, false, "20");
+  command.SetOption("numberOfGridNodesInsideImageInOneDimensionFine", "f", false, "Number of grid nodes in fine sampling.");
+  command.AddOptionField("numberOfGridNodesInsideImageInOneDimensionFine", "numberOfGridNodesInsideImageInOneDimensionFine", MetaCommand::INT, true, "20");
 
-  command.SetOption("maximumStepLength", "msl", false, "Maximum step length.");
-  command.AddOptionField("maximumStepLength", "msl", MetaCommand::FLOAT, false, "10.0");
+  command.SetOption("maximumStepLength", "s", false, "Maximum step length.");
+  command.AddOptionField("maximumStepLength", "maximumStepLength", MetaCommand::FLOAT, true, "10.0");
 
-  command.SetOption("maximumNumberOfIterations", "iter", false, "Maximum number of iterations.");
-  command.AddOptionField("maximumNumberOfIterations", "iter", MetaCommand::INT, false, "200");
+  command.SetOption("maximumNumberOfIterations", "r", false, "Maximum number of iterations.");
+  command.AddOptionField("maximumNumberOfIterations", "maximumNumberOfIterations", MetaCommand::INT, true, "200");
 
-  command.SetOption("Verbose", "v", false, "Print more verbose output");
+  command.SetOption("maxNumberOfThreads", "q", false, "Maximum number of threads.");
+  command.AddOptionField("maxNumberOfThreads", "maxNumberOfThreads", MetaCommand::INT, true, "4");
+
+  command.SetOption("verbose", "w", false, "Print more verbose output");
 
   if (!command.Parse(argc, argv)) {
     return 1;
@@ -161,23 +179,25 @@ int main(int argc, char *argv[]) {
 
   int maximumNumberOfIterations = 200; // argv[13]
   if (command.GetOptionWasSet("maximumNumberOfIterations"))
-    maximumNumberOfIterations = command.GetValueAsInt("maximumNumberOfIterations", "iter");
+    maximumNumberOfIterations = command.GetValueAsInt("maximumNumberOfIterations", "maximumNumberOfIterations");
 
   float maximumStepLength = 10.0f; // argv[12]
   if (command.GetOptionWasSet("maximumStepLength"))
-    maximumStepLength = command.GetValueAsFloat("maximumStepLength", "msl");
+    maximumStepLength = command.GetValueAsFloat("maximumStepLength", "maximumStepLength");
 
   int numberOfGridNodesInsideImageInOneDimensionFine = 20; // argv[11]
   if (command.GetOptionWasSet("numberOfGridNodesInsideImageInOneDimensionFine"))
-    numberOfGridNodesInsideImageInOneDimensionFine = command.GetValueAsInt("numberOfGridNodesInsideImageInOneDimensionFine", "gnf");
+    numberOfGridNodesInsideImageInOneDimensionFine =
+        command.GetValueAsInt("numberOfGridNodesInsideImageInOneDimensionFine", "numberOfGridNodesInsideImageInOneDimensionFine");
 
   int numberOfGridNodesInsideImageInOneDimensionCoarse = 5; // argv[10]
   if (command.GetOptionWasSet("numberOfGridNodesInsideImageInOneDimensionCoarse"))
-    numberOfGridNodesInsideImageInOneDimensionCoarse = command.GetValueAsInt("numberOfGridNodesInsideImageInOneDimensionCoarse", "gnc");
+    numberOfGridNodesInsideImageInOneDimensionCoarse =
+        command.GetValueAsInt("numberOfGridNodesInsideImageInOneDimensionCoarse", "numberOfGridNodesInsideImageInOneDimensionCoarse");
 
   std::string deformationField; // argv[9]
   if (command.GetOptionWasSet("deformationField"))
-    deformationField = command.GetValueAsString("deformationField", "deformation");
+    deformationField = command.GetValueAsString("deformationField", "deformationField");
 
   std::string fixedImageMaskFile;
   if (command.GetOptionWasSet("fixedImageMaskFile"))
@@ -185,7 +205,7 @@ int main(int argc, char *argv[]) {
 
   std::string filenameForFinalTransformParameter; // argv[6]
   if (command.GetOptionWasSet("filenameForFinalTransformParameter"))
-    filenameForFinalTransformParameter = command.GetValueAsString("filenameForFinalTransformParameter", "transform");
+    filenameForFinalTransformParameter = command.GetValueAsString("filenameForFinalTransformParameter", "filenameForFinalTransformParameter");
 
   std::string differenceOutputFile; // argv[4]
   if (command.GetOptionWasSet("differenceOutputFile"))
@@ -203,29 +223,23 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("useExplicitPDFderivatives"))
     useExplicitPDFderivatives = true;
 
-  bool verbose = false;
-  if (command.GetOptionWasSet("Verbose"))
-    verbose = true;
+  if (command.GetOptionWasSet("maxNumberOfThreads"))
+    itk::MultiThreaderBase::SetGlobalMaximumNumberOfThreads(command.GetValueAsInt("maxNumberOfThreads", "maxNumberOfThreads"));
 
-  /* if (argc < 4) {
-      std::cerr << "Missing Parameters " << std::endl;
-      std::cerr << "Usage: " << argv[0];
-      std::cerr << " fixedImageFile  movingImageFile outputImagefile  ";
-      std::cerr << " [differenceOutputfile] [differenceBeforeRegistration] ";
-      std::cerr << " [filenameForFinalTransformParameters] ";
-      std::cerr << " [useExplicitPDFderivatives ] [useCachingBSplineWeights ] ";
-      std::cerr << " [deformationField] ";
-      std::cerr << " [numberOfGridNodesInsideImageInOneDimensionCoarse] ";
-      std::cerr << " [numberOfGridNodesInsideImageInOneDimensionFine] ";
-      std::cerr << " [maximumStepLength] [maximumNumberOfIterations]";
-      std::cerr << std::endl;
-      return EXIT_FAILURE;
-    } */
+  // bool verbose = false; // global variable
+  if (command.GetOptionWasSet("verbose")) {
+    fprintf(stdout, "verbose level 1\n");
+    fprintf(stdout, "use %d threads...\n", itk::MultiThreaderBase::GetGlobalMaximumNumberOfThreads());
+    resultJSON["num_threads"] = itk::MultiThreaderBase::GetGlobalMaximumNumberOfThreads();
+    verbose = true;
+  }
 
   resultJSON["command_line"] = json::array();
   for (int i = 0; i < argc; i++) {
     resultJSON["command_line"].push_back(std::string(argv[i]));
   }
+
+  cpu_timer timer;
 
   constexpr unsigned int ImageDimension = 3;
   using PixelType = signed short;
@@ -284,15 +298,17 @@ int main(int argc, char *argv[]) {
 
   using ImageCasterType = itk::CastImageFilter<FixedImageType, InternalImageType>;
 
-  fprintf(stdout, "fixed image reader voxel size is: %f %f %f\n", fixedImageReader->GetOutput()->GetSpacing()[0],
-          fixedImageReader->GetOutput()->GetSpacing()[1], fixedImageReader->GetOutput()->GetSpacing()[2]);
-  fprintf(stdout, "fixed image reader origin is: %f %f %f\n", fixedImageReader->GetOutput()->GetOrigin()[0], fixedImageReader->GetOutput()->GetOrigin()[1],
-          fixedImageReader->GetOutput()->GetOrigin()[2]);
+  if (verbose) {
+    fprintf(stdout, "fixed image reader voxel size is: %f %f %f\n", fixedImageReader->GetOutput()->GetSpacing()[0],
+            fixedImageReader->GetOutput()->GetSpacing()[1], fixedImageReader->GetOutput()->GetSpacing()[2]);
+    fprintf(stdout, "fixed image reader origin is: %f %f %f\n", fixedImageReader->GetOutput()->GetOrigin()[0], fixedImageReader->GetOutput()->GetOrigin()[1],
+            fixedImageReader->GetOutput()->GetOrigin()[2]);
 
-  fprintf(stdout, "moving image reader voxel size is: %f %f %f\n", movingImageReader->GetOutput()->GetSpacing()[0],
-          movingImageReader->GetOutput()->GetSpacing()[1], movingImageReader->GetOutput()->GetSpacing()[2]);
-  fprintf(stdout, "moving image reader origin is: %f %f %f\n", movingImageReader->GetOutput()->GetOrigin()[0], movingImageReader->GetOutput()->GetOrigin()[1],
-          movingImageReader->GetOutput()->GetOrigin()[2]);
+    fprintf(stdout, "moving image reader voxel size is: %f %f %f\n", movingImageReader->GetOutput()->GetSpacing()[0],
+            movingImageReader->GetOutput()->GetSpacing()[1], movingImageReader->GetOutput()->GetSpacing()[2]);
+    fprintf(stdout, "moving image reader origin is: %f %f %f\n", movingImageReader->GetOutput()->GetOrigin()[0], movingImageReader->GetOutput()->GetOrigin()[1],
+            movingImageReader->GetOutput()->GetOrigin()[2]);
+  }
 
   ImageCasterType::Pointer fixedImageCaster = ImageCasterType::New();
   ImageCasterType::Pointer movingImageCaster = ImageCasterType::New();
@@ -318,6 +334,52 @@ int main(int argc, char *argv[]) {
   movingImage->SetOrigin(movingImageReader->GetOutput()->GetOrigin());
   movingImage->SetSpacing(movingImageReader->GetOutput()->GetSpacing());
   movingImage->SetDirection(movingImageReader->GetOutput()->GetDirection());
+
+  // read in the Mask (if it has been provided)
+  // typedef itk::ImageMaskSpatialObject<ImageDimension> MaskType;
+  // MaskType::Pointer spatialMask = MaskType::New();
+  using ImageMaskSpatialObjectType = itk::ImageMaskSpatialObject<ImageDimension>;
+  typename ImageMaskSpatialObjectType::Pointer spatialMask = ImageMaskSpatialObjectType::New();
+
+  typedef itk::Image<unsigned char, ImageDimension> ImageMaskType;
+  typedef itk::ImageFileReader<ImageMaskType> MaskReaderType;
+  MaskReaderType::Pointer maskReader = MaskReaderType::New();
+  if (command.GetOptionWasSet("fixedImageMaskFile")) {
+    if (verbose)
+      fprintf(stdout, "reading in the fixed image mask...\n");
+    maskReader->SetFileName(fixedImageMaskFile);
+    maskReader->Update();
+    // the mask should have to information of the fixed image
+    // copy to make sure that is the case? Or should we trust the user?
+    ImageMaskType::Pointer mm = maskReader->GetOutput();
+
+    // lets try and create a mask similar to the Test for MattesMutualInformationImageToImageMetricTest.css
+    // in that example the mask mimics the fixed image
+    typename ImageMaskType::Pointer imgFixedMask = ImageMaskType::New();
+    imgFixedMask->CopyInformation(fixedImage);
+    typename FixedImageType::RegionType region = fixedImage->GetLargestPossibleRegion();
+    imgFixedMask->SetRegions(region);
+    imgFixedMask->Allocate(true); // initialize
+    // copy the pixel over from the imported mm
+    itk::ImageRegionIterator<ImageMaskType> maskIterator(mm, region);
+    itk::ImageRegionIterator<ImageMaskType> fixedIterator(imgFixedMask, region);
+    while (!maskIterator.IsAtEnd() && !fixedIterator.IsAtEnd()) {
+      fixedIterator.Set(maskIterator.Get());
+      ++fixedIterator;
+      ++maskIterator;
+    }
+
+    // FixedImageType::RegionType fR = fixedImageReader->GetOutput()->GetBufferedRegion();
+    // mm->SetRegions(fR);
+    // mm->CopyInformation(fixedImage);
+    // mm->SetRegions(region);
+    // mm->SetOrigin(fixedImage->GetOrigin());
+    // mm->SetSpacing(fixedImage->GetSpacing());
+    // mm->SetDirection(fixedImage->GetDirection());
+
+    spatialMask->SetImage(imgFixedMask);
+    spatialMask->Update();
+  }
 
   /*   fprintf(stdout, "fixed image caster voxel size is: %f %f %f\n", fixedImageCaster->GetOutput()->GetSpacing()[0],
           fixedImageCaster->GetOutput()->GetSpacing()[1],
@@ -353,9 +415,20 @@ int main(int argc, char *argv[]) {
   metric->SetNumberOfHistogramBins(50);
   resultJSON["number_of_histogram_bins"] = 50;
 
+  if (command.GetOptionWasSet("fixedImageMaskFile")) {
+    if (verbose) {
+      // where is the spatialMask?
+      fprintf(stdout, "spatial mask has voxel size: %f %f %f\n", maskReader->GetOutput()->GetSpacing()[0], maskReader->GetOutput()->GetSpacing()[1],
+              maskReader->GetOutput()->GetSpacing()[2]);
+      fprintf(stdout, "spatial mask is at origin: %f %f %f\n", maskReader->GetOutput()->GetOrigin()[0], maskReader->GetOutput()->GetOrigin()[1],
+              maskReader->GetOutput()->GetOrigin()[2]);
+    }
+    metric->SetFixedImageMask(spatialMask);
+    resultJSON["use_fixed_image_mask"] = fixedImageMaskFile;
+  }
   FixedImageType::RegionType fixedRegion = fixedImage->GetBufferedRegion();
   const unsigned int numberOfPixels = fixedRegion.GetNumberOfPixels();
-  metric->ReinitializeSeed(76926294);
+  metric->ReinitializeSeed(42);
   if (useExplicitPDFderivatives) {
     // Define whether to calculate the metric derivative by explicitly
     // computing the derivatives of the joint PDF with respect to the Transform
@@ -380,15 +453,21 @@ int main(int argc, char *argv[]) {
   initializer->SetFixedImage(fixedImageCaster->GetOutput());
   initializer->SetMovingImage(movingImageCaster->GetOutput());
   initializer->MomentsOn();
-  std::cout << "Starting Rigid Transform Initialization " << std::endl;
+  if (verbose) {
+    std::cout << "Starting Rigid Transform Initialization " << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   memorymeter.Start("Rigid Initialization");
   chronometer.Start("Rigid Initialization");
   initializer->InitializeTransform();
   chronometer.Stop("Rigid Initialization");
   memorymeter.Stop("Rigid Initialization");
-  std::cout << "Rigid Transform Initialization completed" << std::endl;
-  std::cout << rigidTransform->GetParameters() << std::endl;
-  std::cout << std::endl;
+  if (verbose) {
+    std::cout << "Rigid Transform Initialization completed" << std::endl;
+    std::cout << rigidTransform->GetParameters() << std::endl;
+    std::cout << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   registration->SetFixedImageRegion(fixedRegion);
   registration->SetInitialTransformParameters(rigidTransform->GetParameters());
   registration->SetTransform(rigidTransform);
@@ -408,7 +487,7 @@ int main(int argc, char *argv[]) {
   optimizer->SetScales(optimizerScales);
   optimizer->SetMaximumStepLength(0.2000);
   optimizer->SetMinimumStepLength(0.0001);
-  optimizer->SetNumberOfIterations(400);
+  optimizer->SetNumberOfIterations(maximumNumberOfIterations * 2); // fixed to high number == 400
   //
   // The rigid transform has 6 parameters we use therefore a few samples to run
   // this stage.
@@ -421,16 +500,22 @@ int main(int argc, char *argv[]) {
   // Create the Command observer and register it with the optimizer.
   //
   CommandIterationUpdate::Pointer observer = CommandIterationUpdate::New();
+
   optimizer->AddObserver(itk::IterationEvent(), observer);
-  std::cout << "Starting Rigid Registration " << std::endl;
+  if (verbose) {
+    std::cout << "Starting Rigid Registration " << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   try {
     memorymeter.Start("Rigid Registration");
     chronometer.Start("Rigid Registration");
     registration->Update();
     chronometer.Stop("Rigid Registration");
     memorymeter.Stop("Rigid Registration");
-    std::cout << "Optimizer stop condition = " << registration->GetOptimizer()->GetStopConditionDescription() << registration->GetLastTransformParameters()
-              << std::endl;
+    if (verbose) {
+      std::cout << "Optimizer stop condition = " << registration->GetOptimizer()->GetStopConditionDescription() << registration->GetLastTransformParameters()
+                << std::endl;
+    }
     std::ostringstream o;
     o << registration->GetLastTransformParameters();
     resultJSON["rigid_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
@@ -441,8 +526,11 @@ int main(int argc, char *argv[]) {
     std::cerr << err << std::endl;
     return EXIT_FAILURE;
   }
-  std::cout << "Rigid Registration completed" << std::endl;
-  std::cout << std::endl;
+  if (verbose) {
+    std::cout << "Rigid Registration completed" << std::endl;
+    std::cout << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   rigidTransform->SetParameters(registration->GetLastTransformParameters());
   //
   //  Perform Affine Registration
@@ -478,7 +566,10 @@ int main(int argc, char *argv[]) {
   // multi-resolution registration because it is indeed a sub-sampling of the
   // image.
   metric->SetNumberOfSpatialSamples(80000L);
-  std::cout << "Starting Affine Registration " << std::endl;
+  if (verbose) {
+    std::cout << "Starting Affine Registration " << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   try {
     memorymeter.Start("Affine Registration");
     chronometer.Start("Affine Registration");
@@ -496,9 +587,12 @@ int main(int argc, char *argv[]) {
     std::cerr << err << std::endl;
     return EXIT_FAILURE;
   }
-  std::cout << "Affine Registration completed" << std::endl;
-  std::cout << registration->GetLastTransformParameters() << std::endl;
-  std::cout << std::endl;
+  if (verbose) {
+    std::cout << "Affine Registration completed" << std::endl;
+    std::cout << registration->GetLastTransformParameters() << std::endl;
+    std::cout << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   affineTransform->SetParameters(registration->GetLastTransformParameters());
 
   // code from 3.20 that does know about bulk transforms
@@ -582,10 +676,11 @@ int main(int argc, char *argv[]) {
   // Software Guide : BeginCodeSnippet
   optimizer->SetMaximumStepLength(maximumStepLength /* 10.0 */);
   optimizer->SetMinimumStepLength(0.01);
+  resultJSON["optimizer_max_step_length"] = maximumStepLength;
 
   optimizer->SetRelaxationFactor(0.7);
   optimizer->SetNumberOfIterations(maximumNumberOfIterations /*  200 */);
-  resultJSON["optimizer_number_iterations"] = 200;
+  resultJSON["optimizer_number_iterations"] = maximumNumberOfIterations;
 
   // Software Guide : EndCodeSnippet
 
@@ -609,8 +704,10 @@ int main(int argc, char *argv[]) {
   metric->SetNumberOfSpatialSamples(numberOfBSplineParameters * 100);
   resultJSON["optimizer_number_of_samples"] = numberOfBSplineParameters * 100;
 
-  std::cout << std::endl << "Starting Deformable Registration Coarse Grid" << std::endl;
-
+  if (verbose) {
+    std::cout << std::endl << "Starting Deformable Registration Coarse Grid" << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   try {
     // itkProbesStart( "Deformable Registration Coarse" );
     // registration->StartRegistration();
@@ -625,15 +722,19 @@ int main(int argc, char *argv[]) {
     std::ostringstream o;
     o << registration->GetLastTransformParameters();
     resultJSON["elastic_coarse_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
-    resultJSON["elastic_coarse_transform"] = o.str();
+    if (verbose)
+      resultJSON["elastic_coarse_transform"] = o.str();
   } catch (itk::ExceptionObject &err) {
     std::cerr << "ExceptionObject caught !" << std::endl;
     std::cerr << err << std::endl;
     return EXIT_FAILURE;
   }
 
-  std::cout << "Deformable Registration Coarse Grid completed" << std::endl;
-  std::cout << std::endl;
+  if (verbose) {
+    std::cout << "Deformable Registration Coarse Grid completed" << std::endl;
+    std::cout << std::endl;
+    std::cout << timer.format() << '\n';
+  }
 
   OptimizerType::ParametersType finalParameters = registration->GetLastTransformParameters();
 
@@ -746,8 +847,10 @@ int main(int argc, char *argv[]) {
   //
   //  Software Guide : EndLatex
 
-  std::cout << "Starting Registration with high resolution transform" << std::endl;
-
+  if (verbose) {
+    std::cout << "Starting Registration with high resolution transform" << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   // Software Guide : BeginCodeSnippet
   registration->SetInitialTransformParameters(bsplineTransformFine->GetParameters());
   registration->SetTransform(bsplineTransformFine);
@@ -764,12 +867,12 @@ int main(int argc, char *argv[]) {
   // multi-resolution registration because it is indeed a sub-sampling of the
   // image.
   const unsigned long numberOfSamples =
-      static_cast<unsigned long>(vcl_sqrt(static_cast<double>(numberOfBSplineParameters) * static_cast<double>(numberOfPixels)));
+      static_cast<unsigned long>(std::sqrt(static_cast<double>(numberOfBSplineParameters) * static_cast<double>(numberOfPixels)));
 
   metric->SetNumberOfSpatialSamples(numberOfSamples);
+  resultJSON["registation_fine_number_of_samples"] = numberOfSamples;
 
   try {
-
     memorymeter.Start("Deformable Registration Fine");
     chronometer.Start("Deformable Registration Fine");
     registration->Update();
@@ -779,7 +882,10 @@ int main(int argc, char *argv[]) {
     std::ostringstream o;
     o << registration->GetLastTransformParameters();
     resultJSON["elastic_fine_stop_condition"] = registration->GetOptimizer()->GetStopConditionDescription();
-    resultJSON["elastic_fine_transform"] = o.str();
+    if (verbose) {
+      std::cout << registration->GetOptimizer()->GetStopConditionDescription() << std::endl;
+      resultJSON["elastic_fine_transform"] = o.str();
+    }
 
     //    itkProbesStart( "Deformable Registration Fine" );
     //    registration->StartRegistration();
@@ -790,10 +896,10 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
   // Software Guide : EndCodeSnippet
-
-  std::cout << "Deformable Registration Fine Grid completed" << std::endl;
-  std::cout << std::endl;
-
+  if (verbose) {
+    std::cout << "Deformable Registration Fine Grid completed" << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   // Report the time and memory taken by the registration
   // itkProbesReport( std::cout );
 
@@ -1043,7 +1149,10 @@ int main(int argc, char *argv[]) {
 
   caster->SetInput(resample->GetOutput());
   writer->SetInput(caster->GetOutput());
-  std::cout << "Writing resampled moving image...";
+  if (verbose) {
+    std::cout << "Writing resampled moving image...";
+    std::cout << timer.format() << '\n';
+  }
   try {
     writer->Update();
   } catch (itk::ExceptionObject &err) {
@@ -1051,7 +1160,10 @@ int main(int argc, char *argv[]) {
     std::cerr << err << std::endl;
     return EXIT_FAILURE;
   }
-  std::cout << " Done!" << std::endl;
+  if (verbose) {
+    std::cout << " Done!" << std::endl;
+    std::cout << timer.format() << '\n';
+  }
   resultJSON["resampled_moving_image"] = outputImageFile /* argv[3] */;
   using DifferenceFilterType = itk::SquaredDifferenceImageFilter<InternalImageType, InternalImageType, InternalImageType>;
   DifferenceFilterType::Pointer difference = DifferenceFilterType::New();
@@ -1060,7 +1172,11 @@ int main(int argc, char *argv[]) {
   sqrtFilter->SetInput(difference->GetOutput());
   using DifferenceImageWriterType = itk::ImageFileWriter<InternalImageType>;
   DifferenceImageWriterType::Pointer writer2 = DifferenceImageWriterType::New();
-  writer2->SetInput(sqrtFilter->GetOutput());
+  InternalImageType::Pointer sqrtF = sqrtFilter->GetOutput();
+  sqrtF->SetOrigin(fixedImage->GetOrigin());
+  sqrtF->SetSpacing(fixedImage->GetSpacing());
+  sqrtF->SetDirection(fixedImage->GetDirection());
+  writer2->SetInput(sqrtF);
   // Compute the difference image between the
   // fixed and resampled moving image.
   if (command.GetOptionWasSet("differenceOutputFile")) {
@@ -1073,7 +1189,10 @@ int main(int argc, char *argv[]) {
     create_directories(p.parent_path());
     resultJSON["difference_image_after_elastic"] = differenceOutputFile /* argv[4] */;
 
-    std::cout << "Writing difference image after registration...";
+    if (verbose) {
+      std::cout << "Writing difference image after registration...";
+      std::cout << timer.format() << '\n';
+    }
     try {
       writer2->Update();
     } catch (itk::ExceptionObject &err) {
@@ -1081,7 +1200,10 @@ int main(int argc, char *argv[]) {
       std::cerr << err << std::endl;
       return EXIT_FAILURE;
     }
-    std::cout << " Done!" << std::endl;
+    if (verbose) {
+      std::cout << " Done!" << std::endl;
+      std::cout << timer.format() << '\n';
+    }
   }
   // Compute the difference image between the
   // affine registered and elastic registered image.
@@ -1094,7 +1216,10 @@ int main(int argc, char *argv[]) {
 
     difference->SetInput1(fixedImageCaster->GetOutput());
     resample->SetTransform(affineTransform);
-    std::cout << "Writing difference image before elastic registration...";
+    if (verbose) {
+      std::cout << "Writing difference image before elastic registration...";
+      std::cout << timer.format() << '\n';
+    }
     resultJSON["difference_image_before_elastic"] = differenceBeforeRegistration /* argv[5] */;
 
     try {
@@ -1104,12 +1229,18 @@ int main(int argc, char *argv[]) {
       std::cerr << err << std::endl;
       return EXIT_FAILURE;
     }
-    std::cout << " Done!" << std::endl;
+    if (verbose) {
+      std::cout << " Done!" << std::endl;
+      std::cout << timer.format() << '\n';
+    }
   }
   // Generate the explicit deformation field resulting from
   // the registration.
   if (command.GetOptionWasSet("deformationField")) {
-    std::cout << "Create displacement field for export... ";
+    if (verbose) {
+      std::cout << "Create displacement field for export... ";
+      std::cout << timer.format() << '\n';
+    }
     using VectorType = itk::Vector<float, ImageDimension>;
     using DisplacementFieldType = itk::Image<VectorType, ImageDimension>;
     DisplacementFieldType::Pointer field = DisplacementFieldType::New();
@@ -1133,7 +1264,10 @@ int main(int argc, char *argv[]) {
       fi.Set(displacement);
       ++fi;
     }
-    std::cout << "Done!" << std::endl;
+    if (verbose) {
+      std::cout << "Done!" << std::endl;
+      std::cout << timer.format() << '\n';
+    }
     using FieldWriterType = itk::ImageFileWriter<DisplacementFieldType>;
     FieldWriterType::Pointer fieldWriter = FieldWriterType::New();
     fieldWriter->SetInput(field);
@@ -1144,7 +1278,10 @@ int main(int argc, char *argv[]) {
     path p(deformationField /* argv[9] */);
     create_directories(p.parent_path());
 
-    std::cout << "Writing deformation field ...";
+    if (verbose) {
+      std::cout << "Writing deformation field ...";
+      std::cout << timer.format() << '\n';
+    }
     try {
       fieldWriter->Update();
     } catch (itk::ExceptionObject &excp) {
@@ -1152,7 +1289,10 @@ int main(int argc, char *argv[]) {
       std::cerr << excp << std::endl;
       return EXIT_FAILURE;
     }
-    std::cout << " Done!" << std::endl;
+    if (verbose) {
+      std::cout << " Done!" << std::endl;
+      std::cout << timer.format() << '\n';
+    }
 
     // we should write out the Jacobian of the deformation field as well
     // we can use this filter: itkDisplacementFieldJacobianDeterminantFilter.h
@@ -1178,10 +1318,17 @@ int main(int argc, char *argv[]) {
 
       // std::string a(labelfieldfilename + "trachea.nii");
       writer->SetFileName(volFileName);
-      writer->SetInput(computeJacobian->GetOutput());
+      InternalImageType::Pointer cJ = computeJacobian->GetOutput();
+      cJ->SetSpacing(fixedImage->GetSpacing());
+      cJ->SetOrigin(fixedImage->GetOrigin());
+      cJ->SetDirection(fixedImage->GetDirection());
+      writer->SetInput(cJ);
 
-      std::cout << "Writing the jacobian scalar image as " << std::endl;
-      std::cout << volFileName << std::endl << std::endl;
+      if (verbose) {
+        std::cout << "Writing the jacobian scalar image as " << std::endl;
+        std::cout << volFileName << std::endl << std::endl;
+        std::cout << timer.format() << '\n';
+      }
       resultJSON["jacobian"] = volFileName;
 
       try {
@@ -1190,19 +1337,30 @@ int main(int argc, char *argv[]) {
         std::cout << ex << std::endl;
         return EXIT_FAILURE;
       }
+      if (verbose) {
+        std::cout << "Done!" << std::endl;
+        std::cout << timer.format() << '\n';
+      }
     }
   }
   // Optionally, save the transform parameters in a file
   if (command.GetOptionWasSet("filenameForFinalTransformParameter")) {
-    std::cout << "Writing transform parameter file ...";
+    if (verbose) {
+      std::cout << "Writing transform parameter file ...";
+      std::cout << timer.format() << '\n';
+    }
     using TransformWriterType = itk::TransformFileWriter;
     TransformWriterType::Pointer transformWriter = TransformWriterType::New();
     transformWriter->AddTransform(bsplineTransformFine);
     transformWriter->SetFileName(filenameForFinalTransformParameter /* argv[6] */);
     resultJSON["transform_parameter_file"] = filenameForFinalTransformParameter /*  argv[6] */;
     transformWriter->Update();
-    std::cout << " Done!" << std::endl;
+    if (verbose) {
+      std::cout << " Done!" << std::endl;
+      std::cout << timer.format() << '\n';
+    }
   }
+  resultJSON["runtime"] = timer.format();
 
   std::string res = resultJSON.dump(4) + "\n";
   std::ostringstream o;
