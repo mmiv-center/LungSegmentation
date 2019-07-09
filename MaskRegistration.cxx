@@ -4,6 +4,10 @@
 // ./MaskRegistration longData/049300006_049300006_seg/1.2.840.113654.2.3.1995.3.0.6.2017062709435100771.6151251220170622.nii
 // longData/0493_00006_0493_00006_seg/1.2.840.113654.2.3.1995.3.0.6.2017053107400100715.101.051251220170523.nii longData/reg/volume.nii
 
+// ./MaskRegistration -w -q 4 -m longData/049300006_049300006_seg/labels.nii -i longData/reg/difference.nii -b longData/reg/difference_before.nii -d
+// longData/reg/deformation_field.nii longData/049300006_049300006_seg/1.2.840.113654.2.3.1995.3.0.6.2017062709435100771.6151251220170622.nii
+// longData/0493_00006_0493_00006_seg/1.2.840.113654.2.3.1995.3.0.6.2017053107400100715.101.051251220170523.nii longData/reg/volume.nii
+
 /*=========================================================================
  *
  *  Copyright Insight Software Consortium
@@ -208,12 +212,13 @@ int main(int argc, char *argv[]) {
     filenameForFinalTransformParameter = command.GetValueAsString("filenameForFinalTransformParameter", "filenameForFinalTransformParameter");
 
   std::string differenceOutputFile; // argv[4]
-  if (command.GetOptionWasSet("differenceOutputFile"))
-    differenceOutputFile = command.GetValueAsString("differenceOutputFile", "difference");
+  if (command.GetOptionWasSet("differenceOutputFile")) {
+    differenceOutputFile = command.GetValueAsString("differenceOutputFile", "differenceOutputFile");
+  }
 
   std::string differenceBeforeRegistration; // argv[5]
   if (command.GetOptionWasSet("differenceBeforeRegistration"))
-    differenceBeforeRegistration = command.GetValueAsString("differenceBeforeRegistration", "differenceBefore");
+    differenceBeforeRegistration = command.GetValueAsString("differenceBeforeRegistration", "differenceBeforeRegistration");
 
   bool useCachingBSplineWeights = false; // argv[8]
   if (command.GetOptionWasSet("useCachingBSplineWeights"))
@@ -1214,7 +1219,12 @@ int main(int argc, char *argv[]) {
     path p(differenceBeforeRegistration /* argv[5] */);
     create_directories(p.parent_path());
 
-    difference->SetInput1(fixedImageCaster->GetOutput());
+    InternalImageType::Pointer sqrtF = fixedImageCaster->GetOutput();
+    sqrtF->SetOrigin(fixedImage->GetOrigin());
+    sqrtF->SetSpacing(fixedImage->GetSpacing());
+    sqrtF->SetDirection(fixedImage->GetDirection());
+
+    difference->SetInput1(sqrtF);
     resample->SetTransform(affineTransform);
     if (verbose) {
       std::cout << "Writing difference image before elastic registration...";
