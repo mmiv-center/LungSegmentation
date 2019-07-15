@@ -145,11 +145,11 @@ int main(int argc, char *argv[]) {
   command.AddField("indir", "Directory with input DICOM image series.", MetaCommand::STRING, true);
   command.AddField("outdir", "Directory for output DICOM image series.", MetaCommand::STRING, true);
 
-  command.SetOption("Mask", "m", false, "Provide a mask image as an additional input. If not supplied the mask will be calculated.");
-  command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
+  // command.SetOption("Mask", "m", false, "Provide a mask image as an additional input. If not supplied the mask will be calculated.");
+  // command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
 
-  command.SetOption("Write", "s", false, "The shrink factor will make the problem easier to handle (sub-sample data). The larger the value the faster.");
-  command.AddOptionField("Write", "shrinkFactor", MetaCommand::INT, false, "3");
+  // command.SetOption("Write", "s", false, "The shrink factor will make the problem easier to handle (sub-sample data). The larger the value the faster.");
+  // command.AddOptionField("Write", "shrinkFactor", MetaCommand::INT, false, "3");
 
   command.SetOption("SeriesName", "n", false, "Select series by series name (if more than one series is present).");
   command.AddOptionField("SeriesName", "seriesname", MetaCommand::STRING, false);
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
   command.SetOption("SaveNifty", "u", false, "Save the corrected dataset as a nifty image to the current directory");
   command.AddOptionField("SaveNifty", "niftyfilename", MetaCommand::STRING, true);
 
-  command.SetOption("Verbose", "v", false, "Print more verbose output");
+  command.SetOption("Verbose", "V", false, "Print more verbose output");
 
   if (!command.Parse(argc, argv)) {
     return 1;
@@ -410,7 +410,7 @@ int main(int argc, char *argv[]) {
       //
       typedef itk::SliceBySliceImageFilter<MaskImageType, MaskImageType> SliceFilterType;
       SliceFilterType::Pointer sliceFilter = SliceFilterType::New();
-      sliceFilter->SetInput(maskImage /* binaryErode4->GetOutput() */); // disable the smoothing from before
+      sliceFilter->SetInput(maskImage /* binaryErode4->GetOutput() */); // smoothing should get us a better body mask (touching bed problem)
 
       if (0) { // debug, save the body mask
         typedef itk::ImageFileWriter<MaskImageType> WriterType;
@@ -418,7 +418,7 @@ int main(int argc, char *argv[]) {
         // check if that directory exists, create before writing
         path p("/tmp/");
         writer->SetFileName("/tmp/body_mask.nii");
-        writer->SetInput(maskImage);
+        writer->SetInput(/* binaryErode4->GetOutput() */ maskImage);
 
         std::cout << "Writing the initial mask image as " << std::endl;
         std::cout << "/tmp/body_mask.nii" << std::endl << std::endl;
@@ -439,6 +439,7 @@ int main(int argc, char *argv[]) {
       sliceFilter->Update();
 
       ConnectedComponentImageFilterType::Pointer connected = ConnectedComponentImageFilterType::New();
+      connected->SetBackgroundValue(0);
       connected->SetInput(sliceFilter->GetOutput());
       connected->Update();
 
@@ -456,6 +457,11 @@ int main(int argc, char *argv[]) {
 
       MaskImageType::Pointer mask1 = maskImage;                                  // binaryErode4->GetOutput();
       ImageType::Pointer mask2 = labelShapeKeepNObjectsImageFilter->GetOutput(); // body mask
+      // make mask2 appear over mask1
+      mask2->SetOrigin(mask1->GetOrigin());
+      mask2->SetSpacing(mask1->GetSpacing());
+      mask2->SetDirection(mask1->GetDirection());
+
       MaskImageType::Pointer mask = MaskImageType::New();
       MaskImageType::RegionType maskRegion = inputImage->GetLargestPossibleRegion();
       MaskImageType::RegionType mask1Region = mask1->GetLargestPossibleRegion();
@@ -483,9 +489,74 @@ int main(int argc, char *argv[]) {
         ++inputMask2Iterator;
       }
       fprintf(stdout, "pixel spacing of grow/shrunk image is: %f %f %f\n", mask->GetSpacing()[0], mask->GetSpacing()[1], mask->GetSpacing()[2]);
+      if (0) { // debug, save the body mask
+        typedef itk::ImageFileWriter<MaskImageType> WriterType;
+        WriterType::Pointer writer1 = WriterType::New();
+        // check if that directory exists, create before writing
+        writer1->SetFileName("/tmp/bodyLung_mask01.nii");
+        writer1->SetInput(mask1 /* mask */);
 
-      // now in mask we have every air filled cavety inside the body, look for the largest one, assume its the lungs
+        std::cout << "Writing the lung mask as " << std::endl;
+        std::cout << "/tmp/bodyLung_mask01.nii" << std::endl << std::endl;
+
+        try {
+          writer1->Update();
+        } catch (itk::ExceptionObject &ex) {
+          std::cout << ex << std::endl;
+          return EXIT_FAILURE;
+        }
+        typedef itk::ImageFileWriter<ImageType> WriterType2;
+        WriterType2::Pointer writer2 = WriterType2::New();
+        // check if that directory exists, create before writing
+        writer2->SetFileName("/tmp/bodyLung_mask02.nii");
+        writer2->SetInput(mask2 /* mask */);
+
+        std::cout << "Writing the lung mask as " << std::endl;
+        std::cout << "/tmp/bodyLung_mask02.nii" << std::endl << std::endl;
+
+        try {
+          writer2->Update();
+        } catch (itk::ExceptionObject &ex) {
+          std::cout << ex << std::endl;
+          return EXIT_FAILURE;
+        }
+
+        // connected->GetOutput()
+        WriterType2::Pointer writer3 = WriterType2::New();
+        // check if that directory exists, create before writing
+        writer3->SetFileName("/tmp/bodyLung_mask03.nii");
+        writer3->SetInput(connected->GetOutput());
+
+        std::cout << "Writing the lung mask as " << std::endl;
+        std::cout << "/tmp/bodyLung_mask03.nii" << std::endl << std::endl;
+
+        try {
+          writer3->Update();
+        } catch (itk::ExceptionObject &ex) {
+          std::cout << ex << std::endl;
+          return EXIT_FAILURE;
+        }
+
+        WriterType::Pointer writer4 = WriterType::New();
+        // check if that directory exists, create before writing
+        writer4->SetFileName("/tmp/bodyLung_mask04.nii");
+        writer4->SetInput(mask);
+
+        std::cout << "Writing the lung mask as " << std::endl;
+        std::cout << "/tmp/bodyLung_mask04.nii" << std::endl << std::endl;
+
+        try {
+          writer4->Update();
+        } catch (itk::ExceptionObject &ex) {
+          std::cout << ex << std::endl;
+          return EXIT_FAILURE;
+        }
+      }
+
+      // now in mask we have every air filled cavity inside the body, look for the largest one, assume its the lungs
+      // this will remove the outside the body parts that are created because the slice filling adds them in 2d
       ConnectedComponentImageFilterType::Pointer connected2 = ConnectedComponentImageFilterType::New();
+      connected2->SetBackgroundValue(0);
       connected2->SetInput(mask);
       connected2->Update();
       // std::cout << "Number of connected components: " << connected->GetObjectCount() << std::endl;
@@ -518,8 +589,10 @@ int main(int argc, char *argv[]) {
         if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number of pixel
           useNObjects++;
       }
-      if (useNObjects < 0)
+      if (useNObjects < 0) {
+        fprintf(stdout, "useNObjects is: %d. Set manually to 1.\n", useNObjects);
         useNObjects = 1;
+      }
       fprintf(stdout, "found %d object%s with number of voxel large enough to be of interest...\n", useNObjects, useNObjects == 1 ? "" : "s");
 
       // keep only the large connected component
@@ -687,6 +760,7 @@ int main(int argc, char *argv[]) {
         // Now we can run connected components on the 2D image of the first slice
         // we expect 3 distinct regions
         ConnectedComponentImageFilterType::Pointer connected3 = ConnectedComponentImageFilterType::New();
+        connected3->SetBackgroundValue(0);
         connected3->SetInput(extractFilter->GetOutput());
         connected3->Update();
 
@@ -1053,6 +1127,7 @@ int main(int argc, char *argv[]) {
         // Now we can run connected components on the 2D image of the slice
         // we expect 2 distinct regions (the two lungs)
         ConnectedComponentImageFilterType::Pointer connected4 = ConnectedComponentImageFilterType::New();
+        connected4->SetBackgroundValue(0);
         connected4->SetInput(extractFilter->GetOutput());
         // connected4->Update();
 
@@ -1158,6 +1233,7 @@ int main(int argc, char *argv[]) {
           // we expect 2 distinct regions (the two lungs)
           // as a sanity check we should make sure that we really have two large enough objects now - that the separation was successful
           ConnectedComponentImageFilterType::Pointer connected5 = ConnectedComponentImageFilterType::New();
+          connected5->SetBackgroundValue(0);
           connected5->SetInput(extractFilter->GetOutput());
           // connected5->Update();
           labelType::Pointer labelTmp2 = labelType::New();
@@ -1240,14 +1316,97 @@ int main(int argc, char *argv[]) {
       // ok, if we did this right we should have now 2 separate regions of interest (left and right lung)
       // input is no_trachea
       ConnectedComponentImageFilterType::Pointer connected_final_mask = ConnectedComponentImageFilterType::New();
+      connected_final_mask->SetBackgroundValue(0);
       connected_final_mask->SetInput(no_trachea);
       connected_final_mask->Update();
 
       // ToDo: we should check here which side is left/right to be able to name the lungs appropriately
+      ImageType::Pointer finalLabelField = connected_final_mask->GetOutput();
 
+      ////////////////////////////////////////////////////////////////////////////////////////////////////
+      // We did a 2D region growing before, we should do a 3D regions growing for each of the lungs next
+      // This would fill in the blood vessels better. Best would be a rolling ball filter here...
+      // We have to do this for each area in the lung seperately.
+      if (1) {
+        std::vector<int> labelIds;
+        MaskImageType::RegionType reg = finalLabelField->GetLargestPossibleRegion();
+        itk::ImageRegionIterator<ImageType> labelIter0(finalLabelField, reg);
+        while (!labelIter0.IsAtEnd()) {
+          int l = labelIter0.Get();
+          if (std::find(labelIds.begin(), labelIds.end(), l) != labelIds.end()) {
+            labelIds.push_back(l);
+          }
+          ++labelIter0;
+        }
+        if (verbose) {
+          fprintf(stdout, "Without trachea there are %ld labels in the label field\n", labelIds.size());
+        }
+        for (int label = 0; label < labelIds.size(); label++) {
+          if (labelIds[label] == 0) {
+            // ignore background
+            continue;
+          }
+          // otherwise extract this label to a new volume for region growing
+          ImageType::Pointer tlabel = ImageType::New();
+          tlabel->SetRegions(reg);
+          tlabel->Allocate();
+          tlabel->SetOrigin(finalLabelField->GetOrigin());
+          tlabel->SetSpacing(finalLabelField->GetSpacing());
+          tlabel->SetDirection(finalLabelField->GetDirection());
+          itk::ImageRegionIterator<ImageType> labelIter01(finalLabelField, reg);
+          itk::ImageRegionIterator<ImageType> labelIter02(tlabel, reg);
+          while (!labelIter01.IsAtEnd() && !labelIter02.IsAtEnd()) {
+            if (labelIter01.Get() == labelIds[label]) {
+              labelIter02.Set(1);
+            } else {
+              labelIter02.Set(0);
+            }
+
+            ++labelIter02;
+            ++labelIter01;
+          }
+          // now that we have the values inside the volume, lets do region growing (2x)
+          // and shrinking 2x
+
+          using ErodeFilterType3D = itk::BinaryErodeImageFilter<ImageType, ImageType, StructuringElementType>;
+          using DilateFilterType3D = itk::BinaryDilateImageFilter<ImageType, ImageType, StructuringElementType>;
+
+          DilateFilterType3D::Pointer dilate01 = DilateFilterType3D::New(); // grows inside the tissue
+          DilateFilterType3D::Pointer dilate02 = DilateFilterType3D::New(); // grows inside the tissue
+          ErodeFilterType3D::Pointer erode01 = ErodeFilterType3D::New();
+          ErodeFilterType3D::Pointer erode02 = ErodeFilterType3D::New();
+          StructuringElementType structuringElement2;
+          structuringElement2.SetRadius(1); // 3x3 structuring element
+          structuringElement2.CreateStructuringElement();
+          dilate01->SetKernel(structuringElement2);
+          dilate02->SetKernel(structuringElement2);
+          erode01->SetKernel(structuringElement2);
+          erode02->SetKernel(structuringElement2);
+          dilate01->SetDilateValue(1);
+          dilate02->SetDilateValue(1);
+          erode01->SetErodeValue(1);
+          erode02->SetErodeValue(1);
+          dilate01->SetInput(tlabel);
+          dilate02->SetInput(dilate01->GetOutput());
+          erode01->SetInput(dilate02->GetOutput());
+          erode02->SetInput(erode01->GetOutput());
+          erode02->Update();
+
+          // ok, now copy this back to the image, overwrite the previous value labelIds[label]
+          itk::ImageRegionIterator<ImageType> labelIter03(finalLabelField, reg);
+          itk::ImageRegionIterator<ImageType> labelIter04(erode02->GetOutput(), reg);
+          while (!labelIter03.IsAtEnd() && !labelIter04.IsAtEnd()) {
+            if (labelIter04.Get() == 1) {
+              labelIter03.Set(labelIds[label]);
+            }
+            // we only add voxel but never remove
+            ++labelIter03;
+            ++labelIter04;
+          }
+        }
+      }
       // copy back the trachea to get a full label field
       // the data is in regionGrowingField
-      ImageType::Pointer finalLabelField = connected_final_mask->GetOutput();
       MaskImageType::RegionType tracheaRegion = inputImage->GetLargestPossibleRegion();
       itk::ImageRegionIterator<MaskImageType> tracheaIter(regionGrowingField, tracheaRegion);
       itk::ImageRegionIterator<ImageType> labelIter(finalLabelField, tracheaRegion);
@@ -1366,7 +1525,7 @@ int main(int argc, char *argv[]) {
       std::string frameOfReferenceUID = fuid.Generate();
 
       /////////////////////////////////////////////////////////
-      // lets write a DICOM dataset for the labels as well
+      // lets write a DICOM dataset for the labels as well (color overlay)
       if (1) {
         gdcm::UIDGenerator suid;
         std::string newSeriesUID = suid.Generate();
@@ -1386,6 +1545,7 @@ int main(int argc, char *argv[]) {
 
         itk::ImageRegionIterator<ImageType> fusedLabelIterator(finalLabelField, fusedRegion);
         itk::ImageRegionIterator<ImageType> inputIterator(inputImage, fusedRegion);
+        itk::ImageRegionIterator<ImageType> finalIterator(final, fusedRegion);
         itk::ImageRegionIterator<CImageType> fusedIterator(fused, fusedRegion);
         // now compute the fused image
         // max value of input is?
@@ -1431,7 +1591,7 @@ int main(int argc, char *argv[]) {
         fprintf(stdout, "calculated best threshold low: %f, high: %f\n", t1, t2);
 
         float f = 0.6;
-        while (!fusedLabelIterator.IsAtEnd() && !fusedIterator.IsAtEnd()) {
+        while (!fusedLabelIterator.IsAtEnd() && !fusedIterator.IsAtEnd() && !finalIterator.IsAtEnd()) {
           // is this a copy of do we really write the color here?
           CPixelType value = fusedIterator.Value();
           float scaledP = (inputIterator.Get() - t1) / (t2 - t1);
@@ -1454,10 +1614,17 @@ int main(int argc, char *argv[]) {
           value.SetGreen((int)(green * 255));
           value.SetBlue((int)(blue * 255));
           fusedIterator.Set(value);
+          // update the final image as well (with all gray-value voxel from the labels)
+          if (fusedLabelIterator.Get() > 0) {
+            finalIterator.Set(inputIterator.Get());
+          } else {
+            finalIterator.Set(-1024);
+          }
 
           ++fusedIterator;
           ++fusedLabelIterator;
           ++inputIterator;
+          ++finalIterator;
         }
         // fprintf(stdout, "PhotometricInterpretation is: %d\n", fused->GetPhotometricInterpretation());
 
@@ -1473,10 +1640,11 @@ int main(int argc, char *argv[]) {
         resultJSON["output_label_series"] = std::string(outputSeries);
         resultJSON["output_label_images"] = json::array();
         std::string newSeriesUID2 = suid.Generate();
+
         // now read in each input file in a loop, copy the result data over and write out as DICOM
         for (int i = 0; i < fileNames.size(); i++) {
           // std::cout << "use slice: " << fileNames[i] << " as template for output" << std::endl;
-          fprintf(stdout, "start with %d of %lu\n", i, fileNames.size());
+          // fprintf(stdout, "start with %d of %lu\n", i, fileNames.size());
           // this is 2D work
           typedef signed short InputPixelType;
           const unsigned int Dimension = 2;
@@ -1569,6 +1737,7 @@ int main(int argc, char *argv[]) {
           gdcm::Anonymizer ano;
           ano.SetFile(fd.GetFile());
           std::string seriesDescription;
+          int seriesNumber;
           while (itr != end) {
             itk::MetaDataObjectBase::Pointer entry = itr->second;
             MetaDataStringType::Pointer entryvalue = dynamic_cast<MetaDataStringType *>(entry.GetPointer());
@@ -1588,11 +1757,14 @@ int main(int argc, char *argv[]) {
               if (strcmp(tagkey.c_str(), "0008|103e") == 0) {
                 seriesDescription = tagvalue;
               }
-              if (strcmp(tagkey.c_str(), "0020|1041") == 0) {
-                // don't overwrite the slice position
-                ++itr;
-                continue;
+              if (strcmp(tagkey.c_str(), "0020|0011") == 0) {
+                seriesNumber = atoi(tagvalue.c_str());
               }
+              //              if (strcmp(tagkey.c_str(), "0020|1041") == 0) {
+              //                // don't overwrite the slice position
+              //                ++itr;
+              //                continue;
+              //              }
               // change window level from -400..600 to 150..180
               if (strcmp(tagkey.c_str(), "0028|1050") == 0) {
                 tagvalue = std::string("150");
@@ -1626,7 +1798,7 @@ int main(int argc, char *argv[]) {
           //            itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D", newSeriesUID );
           //            image.SetMetaDataDictionary( outMetaData );
 
-          // For the pupose of this execise we will pretend that this image is referencing
+          // For the purpose of this execise we will pretend that this image is referencing
           // two source image (we need to generate fake UID for that).
           // move this inside the loop above to copy values over
           gdcm::Attribute<0x0008, 0x2111> at1; // Derivative Description
@@ -1645,6 +1817,10 @@ int main(int argc, char *argv[]) {
           at4.SetValue(seriesDescription + " (fused segmentation)");
           ds.Replace(at4.GetAsDataElement());
 
+          gdcm::Attribute<0x0020, 0x0011> at5;
+          at5.SetValue(seriesNumber * 1000);
+          ds.Replace(at5.GetAsDataElement());
+
           gdcm::ImageWriter writer;
           writer.SetImage(image);
           writer.SetFile(fd.GetFile());
@@ -1658,7 +1834,7 @@ int main(int argc, char *argv[]) {
             return 1;
           }
           // here the only thing I can do right now is to write these files temporarily
-          // and to read them back in as itk image, atach header and write again
+          // and to read them back in as itk image, attach header and write again
 
           // we should take the image data from fused instead and make the image RGB
           /*             ImageType::Pointer nImage = final;
@@ -1738,7 +1914,7 @@ int main(int argc, char *argv[]) {
         }
       } // loop over series
 
-      if (0) {
+      if (0) { /*
         // we should make the volume isotropic first, before we do the hessian
         typedef itk::ResampleImageFilter<ImageType, ImageType> ResampleFilterType;
         ResampleFilterType::Pointer resampler = ResampleFilterType::New();
@@ -1864,14 +2040,14 @@ int main(int argc, char *argv[]) {
           double e0 = eigenValue[0];
           double e1 = eigenValue[1];
           double e2 = eigenValue[2];
-          /*
-            Bright tubular structures will have low $\lambda_1$ and large negative values of $\lambda_2$ and $\lambda_3$.
-            Conversely dark tubular structures will have a low value of $\lambda_1$ and large positive values of $\lambda_2$ and $\lambda_3$.
-            Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
-            Dark plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large positive values of $\lambda_3$
-            Bright spherical (blob) like structures have all three eigen values as large negative numbers
-            Dark spherical (blob) like structures have all three eigen values as large positive numbers
-            */
+          //
+          //  Bright tubular structures will have low $\lambda_1$ and large negative values of $\lambda_2$ and $\lambda_3$.
+          //  Conversely dark tubular structures will have a low value of $\lambda_1$ and large positive values of $\lambda_2$ and $\lambda_3$.
+          //  Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
+          //  Dark plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large positive values of $\lambda_3$
+          //  Bright spherical (blob) like structures have all three eigen values as large negative numbers
+          //  Dark spherical (blob) like structures have all three eigen values as large positive numbers
+          //
           // fprintf(stdout, "%f %f %f", e0, e1, e2);
           double mag = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
           // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by magnitude
@@ -1979,7 +2155,7 @@ int main(int argc, char *argv[]) {
             std::cout << ex << std::endl;
             return EXIT_FAILURE;
           }
-        }
+        } */
       }
 
       if (0 /* saveNifty */) { // don't save this because its not with lungs separated
@@ -1991,7 +2167,7 @@ int main(int argc, char *argv[]) {
         create_directories(p.parent_path());
 
         writer->SetFileName(volFileName);
-        writer->SetInput(final);
+        writer->SetInput(final); // not the right field
 
         std::cout << "Writing the intensity inside the lung as " << std::endl << std::endl;
         std::cout << volFileName << std::endl << std::endl;
@@ -2005,7 +2181,7 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      // now save as DICOM
+      // now save as DICOM (should be done later as well?)
       gdcm::UIDGenerator suid;
       std::string newSeriesUID = suid.Generate();
       // frameOfReference as been defined below
@@ -2126,7 +2302,8 @@ int main(int argc, char *argv[]) {
         writer1->SetFileName(o.str());
         writer1->SetImageIO(gdcmImageIO);
         writer1->Update();
-        resultJSON["output_images"].push_back(o.str());
+        if (i == 0 || i == fileNames.size() - 1) // be conservative with output info
+          resultJSON["output_images"].push_back(o.str());
         // std::cout << "done with writing the image...";
       }
     } // loop over series
