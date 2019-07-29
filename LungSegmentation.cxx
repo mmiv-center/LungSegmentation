@@ -1365,9 +1365,10 @@ int main(int argc, char *argv[]) {
       ImageType::Pointer finalLabelField = connected_final_mask->GetOutput();
 
       ////////////////////////////////////////////////////////////////////////////////////////////////////
-      // We did a 2D region growing before, we should do a 3D regions growing for each of the lungs
-      // next This would fill in the blood vessels better. Best would be a rolling ball filter
-      // here... We have to do this for each area in the lung seperately.
+      // We did a 2D region growing before, we should do a 3D regions growing for each of the lungs next
+      // This would fill in the blood vessels better. Best would be a rolling ball filter here...
+      // We have to do this for each area in the lung seperately.
+      // This will only close smaller vessels!
       if (1) {
         std::vector<int> labelIds;
         MaskImageType::RegionType reg = finalLabelField->GetLargestPossibleRegion();
@@ -2239,6 +2240,7 @@ int main(int argc, char *argv[]) {
       // now save as DICOM (should be done later as well?)
       gdcm::UIDGenerator suid;
       std::string newSeriesUID = suid.Generate();
+      int seriesNumber = 0;
       // frameOfReference as been defined below
       // std::string frameOfReferenceUID = fuid.Generate();
 
@@ -2302,8 +2304,13 @@ int main(int argc, char *argv[]) {
 
         std::string studyUID;
         std::string sopClassUID;
+        std::string seriesNumber;
         itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
         itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
+        itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
+
+        int newSeriesNumber = atoi(seriesNumber.c_str()) * 1000 + 1;
+
         gdcmImageIO->KeepOriginalUIDOn();
 
         gdcm::UIDGenerator sopuid;
@@ -2322,6 +2329,7 @@ int main(int argc, char *argv[]) {
 
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|000d", studyUID);
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|000e", newSeriesUID);
+        itk::EncapsulateMetaData<std::string>(dictionary, "0020|0011", std::to_string(newSeriesNumber));
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID);
 
         // these keys don't exist - results in error

@@ -180,6 +180,8 @@ int main(int argc, char *argv[]) {
   std::string fixedImageFile = command.GetValueAsString("fixedImageFile");   // argv[1]
   std::string movingImageFile = command.GetValueAsString("movingImageFile"); // argv[2]
   std::string outputImageFile = command.GetValueAsString("outputImageFile"); // argv[3]
+  resultJSON["use_fixed_image"] = fixedImageFile;
+  resultJSON["use_moving_image"] = movingImageFile;
 
   int maximumNumberOfIterations = 200; // argv[13]
   if (command.GetOptionWasSet("maximumNumberOfIterations"))
