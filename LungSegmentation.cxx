@@ -63,6 +63,11 @@
 #include <boost/filesystem.hpp>
 #include <map>
 
+#include "mytypes.h"
+
+// this may need some types defined later, we should share those types in another header file
+#include "curvedReslice/curvedReslice.hpp"
+
 using json = nlohmann::json;
 using namespace boost::filesystem;
 
@@ -141,15 +146,18 @@ int main(int argc, char *argv[]) {
 
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
-  command.SetDescription("LungSegmentation on CT DICOM images. Read DICOM image series and perform a lung segmentation. Exports a new DICOM series.");
+  command.SetDescription("LungSegmentation on CT DICOM images. Read DICOM image series and perform "
+                         "a lung segmentation. Exports a new DICOM series.");
   command.AddField("indir", "Directory with input DICOM image series.", MetaCommand::STRING, true);
   command.AddField("outdir", "Directory for output DICOM image series.", MetaCommand::STRING, true);
 
-  // command.SetOption("Mask", "m", false, "Provide a mask image as an additional input. If not supplied the mask will be calculated.");
-  // command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
+  // command.SetOption("Mask", "m", false, "Provide a mask image as an additional input. If not
+  // supplied the mask will be calculated."); command.AddOptionField("Mask", "mask",
+  // MetaCommand::STRING, false);
 
-  // command.SetOption("Write", "s", false, "The shrink factor will make the problem easier to handle (sub-sample data). The larger the value the faster.");
-  // command.AddOptionField("Write", "shrinkFactor", MetaCommand::INT, false, "3");
+  // command.SetOption("Write", "s", false, "The shrink factor will make the problem easier to
+  // handle (sub-sample data). The larger the value the faster."); command.AddOptionField("Write",
+  // "shrinkFactor", MetaCommand::INT, false, "3");
 
   command.SetOption("SeriesName", "n", false, "Select series by series name (if more than one series is present).");
   command.AddOptionField("SeriesName", "seriesname", MetaCommand::STRING, false);
@@ -202,11 +210,11 @@ int main(int argc, char *argv[]) {
     resultJSON["command_line"].push_back(std::string(argv[i]));
   }
 
-  typedef signed short PixelType;
+  //  typedef signed short PixelType;
   typedef float FloatPixelType;
   const unsigned int Dimension = 3;
 
-  typedef itk::Image<PixelType, Dimension> ImageType;
+  //  typedef itk::Image<PixelType, Dimension> ImageType;
   typedef itk::Image<FloatPixelType, Dimension> FloatImageType;
 
   typedef itk::ImageSeriesReader<ImageType> ReaderType;
@@ -328,7 +336,7 @@ int main(int argc, char *argv[]) {
       //
       // replace this with the N4 algorithm instead of the gaussian filter
       //
-      MaskImageType::Pointer maskImage = ITK_NULLPTR;
+      MaskImageType::Pointer maskImage;
 
       // if we have a mask on the command line
       if (command.GetOptionWasSet("Mask")) {
@@ -410,7 +418,8 @@ int main(int argc, char *argv[]) {
       //
       typedef itk::SliceBySliceImageFilter<MaskImageType, MaskImageType> SliceFilterType;
       SliceFilterType::Pointer sliceFilter = SliceFilterType::New();
-      sliceFilter->SetInput(maskImage /* binaryErode4->GetOutput() */); // smoothing should get us a better body mask (touching bed problem)
+      sliceFilter->SetInput(maskImage /* binaryErode4->GetOutput() */); // smoothing should get us a better body mask
+                                                                        // (touching bed problem)
 
       if (0) { // debug, save the body mask
         typedef itk::ImageFileWriter<MaskImageType> WriterType;
@@ -451,9 +460,11 @@ int main(int argc, char *argv[]) {
       labelShapeKeepNObjectsImageFilter->SetNumberOfObjects(1);
       labelShapeKeepNObjectsImageFilter->SetAttribute(LabelShapeKeepNObjectsImageFilterType::LabelObjectType::NUMBER_OF_PIXELS);
       labelShapeKeepNObjectsImageFilter->Update();
-      // the above image labelShapeKeepNObjectsImageFilter->GetOutput() is now a good mask for the body of the participant
-      // next we need to segment air inside that mask (do we need to make the mask tighter?, do we need to smooth the input? do we need to calculate this
-      // on a smaller scale?) use binaryErode2->GetOutput(), labelShapeKeepNObjectsImageFilter->GetOutput(), and inputImage to get lung mask
+      // the above image labelShapeKeepNObjectsImageFilter->GetOutput() is now a good mask for the
+      // body of the participant next we need to segment air inside that mask (do we need to make
+      // the mask tighter?, do we need to smooth the input? do we need to calculate this on a
+      // smaller scale?) use binaryErode2->GetOutput(),
+      // labelShapeKeepNObjectsImageFilter->GetOutput(), and inputImage to get lung mask
 
       MaskImageType::Pointer mask1 = maskImage;                                  // binaryErode4->GetOutput();
       ImageType::Pointer mask2 = labelShapeKeepNObjectsImageFilter->GetOutput(); // body mask
@@ -478,10 +489,12 @@ int main(int argc, char *argv[]) {
       itk::ImageRegionIterator<MaskImageType> inputMask1Iterator(mask1, mask1Region);
       itk::ImageRegionIterator<ImageType> inputMask2Iterator(mask2, mask2Region);
       // everything that is 1 in mask2 and 0 in mask1
-      // problem is that mask2 can also be a value larger than 1! example is 0263 where the value is == 2
+      // problem is that mask2 can also be a value larger than 1! example is 0263 where the value is
+      // == 2
       while (!maskIterator.IsAtEnd() && !inputMask1Iterator.IsAtEnd() && !inputMask2Iterator.IsAtEnd()) {
         if (inputMask2Iterator.Get() > 0 && inputMask1Iterator.Get() == 0) {
-          // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0]) / 2) {
+          // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0])
+          // / 2) {
           maskIterator.Set(1);
         }
         ++maskIterator;
@@ -553,18 +566,20 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      // now in mask we have every air filled cavity inside the body, look for the largest one, assume its the lungs
-      // this will remove the outside the body parts that are created because the slice filling adds them in 2d
+      // now in mask we have every air filled cavity inside the body, look for the largest one,
+      // assume its the lungs this will remove the outside the body parts that are created because
+      // the slice filling adds them in 2d
       ConnectedComponentImageFilterType::Pointer connected2 = ConnectedComponentImageFilterType::New();
       connected2->SetBackgroundValue(0);
       connected2->SetInput(mask);
       connected2->Update();
-      // std::cout << "Number of connected components: " << connected->GetObjectCount() << std::endl;
+      // std::cout << "Number of connected components: " << connected->GetObjectCount() <<
+      // std::endl;
 
-      // std::cout << "Number of connected components: " << connected->GetObjectCount() << std::endl;
-      // we sometimes get the two lungs separated here, we should look for the size of connected components
-      // we do have a volume range we are looking for and getting two lungs with different volumes would
-      // be possible (see 0183)
+      // std::cout << "Number of connected components: " << connected->GetObjectCount() <<
+      // std::endl; we sometimes get the two lungs separated here, we should look for the size of
+      // connected components we do have a volume range we are looking for and getting two lungs
+      // with different volumes would be possible (see 0183)
 
       using LabelType = unsigned short;
       using ShapeLabelObjectType = itk::ShapeLabelObject<LabelType, 3>;
@@ -579,14 +594,17 @@ int main(int argc, char *argv[]) {
       LabelMapType *labelMap = label->GetOutput();
       if (labelMap->GetNumberOfLabelObjects() == 0) {
         // error case
-        fprintf(stderr, "Could not find any object in the data using the current set of thresholds, we can try to start again by lowering the threshold?\n");
+        fprintf(stderr, "Could not find any object in the data using the current set of "
+                        "thresholds, we can try to start again by lowering the threshold?\n");
       }
 
       for (unsigned int n = 0; n < labelMap->GetNumberOfLabelObjects(); ++n) {
         ShapeLabelObjectType *labelObject = labelMap->GetNthLabelObject(n);
-        // fprintf(stdout, "object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
+        // fprintf(stdout, "object %d has %0.4f liters, %lu voxel\n", n,
+        // labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
 
-        if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number of pixel
+        if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead
+                                                       // of number of pixel
           useNObjects++;
       }
       if (useNObjects < 0) {
@@ -606,8 +624,8 @@ int main(int argc, char *argv[]) {
 
       // the label filter will keep the id of the label, its not 1, what is it?
       /*typedef itk::MinimumMaximumImageCalculator <ImageType> ImageCalculatorFilterType;
-        ImageCalculatorFilterType::Pointer imageCalculatorFilter = ImageCalculatorFilterType::New ();
-        imageCalculatorFilter->SetImage( labelShapeKeepNObjectsImageFilter2->GetOutput() );
+        ImageCalculatorFilterType::Pointer imageCalculatorFilter = ImageCalculatorFilterType::New
+        (); imageCalculatorFilter->SetImage( labelShapeKeepNObjectsImageFilter2->GetOutput() );
         imageCalculatorFilter->ComputeMaximum();
         int maxValue = imageCalculatorFilter->GetMaximum();*/
       int maxValue = 1;
@@ -664,7 +682,8 @@ int main(int argc, char *argv[]) {
         }
 
         if (maskIterator2.Get() != 0) {
-          // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0]) / 2) {
+          // if (maskIterator.GetIndex()[0] > static_cast<ImageType::IndexValueType>(regionSize[0])
+          // / 2) {
           maskIterator2.Set(imIterator.Get());
           labelFieldIterator.Set(1);
           numberOfPixel++;
@@ -721,9 +740,9 @@ int main(int argc, char *argv[]) {
       // slice we can assume that we have the left and the right lung. If there are three objects
       // the middle one would be the trachae.
 
-      // we can also just give up and start computing a lung average image after elastic registration
-      // that one could be segmented and we take the label from there (if air and over average, use
-      // label from average).
+      // we can also just give up and start computing a lung average image after elastic
+      // registration that one could be segmented and we take the label from there (if air and over
+      // average, use label from average).
 
       ////////////////////////////////////////////////////////////////////////////////////////////////
       // we should now split the lungs into the airways and the lungs using region growing
@@ -778,7 +797,8 @@ int main(int argc, char *argv[]) {
         if (labelMapTmp->GetNumberOfLabelObjects() == 0) {
           // error case
           fprintf(stderr,
-                  "Look at slice %d, Could not find any object in the data using the current set of thresholds, we can try to start again by "
+                  "Look at slice %d, Could not find any object in the data using the current set "
+                  "of thresholds, we can try to start again by "
                   "lowering the threshold?\n",
                   sliceNumber);
         }
@@ -787,18 +807,20 @@ int main(int argc, char *argv[]) {
           ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
           fprintf(stdout, "top slice: object %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
 
-          // if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 - should be selected based on volume instead of number
-          // of pixel
+          // if (labelObject->GetNumberOfPixels() > 150000) // magick number using sample of 1 -
+          // should be selected based on volume instead of number of pixel
           //  useNObjects++;
         }
-        // it might be better to be able to stop early, there are some series with only a single lung
-        // for those we have to stop at 2. What we could do is stop as well if we are too far down in the image stack
+        // it might be better to be able to stop early, there are some series with only a single
+        // lung for those we have to stop at 2. What we could do is stop as well if we are too far
+        // down in the image stack
         if (labelMapTmp->GetNumberOfLabelObjects() == 3 || sliceNumber < 2 * lastSlice / 3) {
           sliceSeedStart = sliceNumber;
           fprintf(stdout, "found %lu objects in slice %d of %d\n", labelMapTmp->GetNumberOfLabelObjects(), sliceNumber + 1, lastSlice);
           // seed point would be in the object that is closest to the center of mass in the image
           // we could go to the last slice that has 3 objects as well...
-          // what if we have only one lung? We should detect the diameter of the airways instead.. something like at least two objects
+          // what if we have only one lung? We should detect the diameter of the airways instead..
+          // something like at least two objects
 
           // which one is closest to the center (center of mass)
           for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); n++) {
@@ -853,12 +875,12 @@ int main(int argc, char *argv[]) {
 
       // before we try to separate the two lungs we should shrink our label again,
       // that should help in cases where the trachea touch the lung wall
-      // if we do this we also have to grow the region again before we do an assignment to tissue type
+      // if we do this we also have to grow the region again before we do an assignment to tissue
+      // type
 
       ///////////////////////////////////////////////////////////////////////////////
-      // ok now do a region growing in labelField starting at minSeedx maxSeedy for all voxel that have the value 1
-      // we should have a second label field here
-      // how do we find neighbors?
+      // ok now do a region growing in labelField starting at minSeedx maxSeedy for all voxel that
+      // have the value 1 we should have a second label field here how do we find neighbors?
       MaskImageType::Pointer regionGrowingField = MaskImageType::New();
       MaskImageType::RegionType regionGrowingFieldRegion = inputImage->GetLargestPossibleRegion();
       regionGrowingField->SetRegions(regionGrowingFieldRegion);
@@ -867,8 +889,9 @@ int main(int argc, char *argv[]) {
       regionGrowingField->SetOrigin(inputImage->GetOrigin());
       regionGrowingField->SetSpacing(inputImage->GetSpacing());
       regionGrowingField->SetDirection(inputImage->GetDirection());
-      // itk::ImageRegionIterator<MaskImageType> regionGrowingFieldIterator(regionGrowingField, regionGrowingFieldRegion);
-      // how to we find neighboring voxel from current location minSeedx and minSeedy and sliceSeedStart?
+      // itk::ImageRegionIterator<MaskImageType> regionGrowingFieldIterator(regionGrowingField,
+      // regionGrowingFieldRegion); how to we find neighboring voxel from current location minSeedx
+      // and minSeedy and sliceSeedStart?
       using PointType = itk::Point<int, MaskImageType::ImageDimension>;
       std::vector<PointType> front;
       PointType p1;
@@ -889,16 +912,16 @@ int main(int argc, char *argv[]) {
 
         count++;
         // fprintf(stdout, "frontSize is %d\n", front.size());
-        // how do we check the first value from front in labelField? We want to know if the value is 0
-        // fprintf(stderr, "size of front before step %d: %lu\n", count, front.size());
+        // how do we check the first value from front in labelField? We want to know if the value is
+        // 0 fprintf(stderr, "size of front before step %d: %lu\n", count, front.size());
         PointType p;
         p[0] = front[0][0];
         p[1] = front[0][1];
         p[2] = front[0][2];
         front.erase(front.begin());
-        // fprintf(stderr, "remove one front pixel in step %d. Size of front is now: %lu\n", count, front.size());
-        // pixelIndex = {{p[0], p[1], p[2]}};
-        // fprintf(stdout, "read pixel value at location %d %d %d as : %d\n", p[0], p[1], p[2], inImage->GetPixel(pixelIndex));
+        // fprintf(stderr, "remove one front pixel in step %d. Size of front is now: %lu\n", count,
+        // front.size()); pixelIndex = {{p[0], p[1], p[2]}}; fprintf(stdout, "read pixel value at
+        // location %d %d %d as : %d\n", p[0], p[1], p[2], inImage->GetPixel(pixelIndex));
 
         // get the 6 neighbors
         PointType pp1;
@@ -1044,15 +1067,16 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      // after separating the airways out we should check again if we have two large regions of interest left
-      // those would be left and right lung respectively. Each one should get its own label.
-      // new Mask for the lung (not in trachea)
+      // after separating the airways out we should check again if we have two large regions of
+      // interest left those would be left and right lung respectively. Each one should get its own
+      // label. new Mask for the lung (not in trachea)
       MaskImageType::Pointer no_trachea = MaskImageType::New();
       MaskImageType::RegionType no_tracheaRegion = inputImage->GetLargestPossibleRegion();
       no_trachea->SetRegions(no_tracheaRegion);
       no_trachea->Allocate();
       no_trachea->SetOrigin(inputImage->GetOrigin());
       no_trachea->SetSpacing(inputImage->GetSpacing());
+      no_trachea->SetDirection(inputImage->GetDirection());
       itk::ImageRegionIterator<MaskImageType> no_tracheaIterator(no_trachea, no_tracheaRegion);
       itk::ImageRegionIterator<MaskImageType> tracheaIterator(regionGrowingField, no_tracheaRegion);
       itk::ImageRegionIterator<MaskImageType> lungMaskIterator(labelField, no_tracheaRegion);
@@ -1096,13 +1120,14 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      // ok special sauce to separate the two lung regions from each other (might touch at the front)
-      // we can start at the level that has three objects and look at each slice going down. If we
-      // ignore the trachea we can calculate an area where the lungs touch (first slice after we have
-      // one object instead of two). If we make the two objects larger (dilate) and subtract them from each
-      // other we should get the touching voxel (in both) that we can remove - to get two separate objects
-      // again, we can repeat this procedure for as long as we have our objects (2) in the current slice.
-      // That should separate them from each other. Additionally we could remove high intensity voxel...
+      // ok special sauce to separate the two lung regions from each other (might touch at the
+      // front) we can start at the level that has three objects and look at each slice going down.
+      // If we ignore the trachea we can calculate an area where the lungs touch (first slice after
+      // we have one object instead of two). If we make the two objects larger (dilate) and subtract
+      // them from each other we should get the touching voxel (in both) that we can remove - to get
+      // two separate objects again, we can repeat this procedure for as long as we have our objects
+      // (2) in the current slice. That should separate them from each other. Additionally we could
+      // remove high intensity voxel...
 
       // lung mask without trachea: no_trachea
 
@@ -1137,33 +1162,39 @@ int main(int argc, char *argv[]) {
         labelTmp->Update();
 
         LabelMapType *labelMapTmp = labelTmp->GetOutput();
-        // labelMapTmp->DisconnectPipeline(); // we want to use extractFilter again, without running the next part
+        // labelMapTmp->DisconnectPipeline(); // we want to use extractFilter again, without running
+        // the next part
         ImageType::Pointer twoLungRegions;
-        // problem is that the number is not a good indicator of separation, instead it should be the
-        // number after filtering out the small islands per slice, so we need to filter all objects by area
-        // with a minimum area per slice
+        // problem is that the number is not a good indicator of separation, instead it should be
+        // the number after filtering out the small islands per slice, so we need to filter all
+        // objects by area with a minimum area per slice
         int lungAreas = 0; // areas large enough to be a single lung
         for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); ++n) {
           ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
-          if (labelObject->GetNumberOfPixels() >
-              10000) { // per slice, todo: convert to volume, problem could be that we are too far up in the stack of slices with small volumes
-            fprintf(stdout, "could be a lung because its large (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000,
-                    labelObject->GetNumberOfPixels());
+          if (labelObject->GetNumberOfPixels() > 10000) { // per slice, todo: convert to volume, problem could be that we are too far
+                                                          // up in the stack of slices with small volumes
+            fprintf(stdout,
+                    "could be a lung because its large (>0.2l) object: %d has %0.4f liters, %lu "
+                    "voxel\n",
+                    n, labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
             lungAreas++;
           }
-          // fprintf(stdout, "is this a lung? (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n, labelObject->GetPhysicalSize() / 1000000,
-          // labelObject->GetNumberOfPixels());
+          // fprintf(stdout, "is this a lung? (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n,
+          // labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
         }
         fprintf(stdout, "FOUND %d lung area%s\n", lungAreas, lungAreas != 1 ? "s" : "");
         if (lungAreas == 1) {
-          // todo: would be better to do this twice, once from below and once from above (limit the effect of direction)
-          // would also be good to look for bright pixel in the separating region, using image information would be better
-          fprintf(stdout, "SEPARATE THEM (using information from previous slice)!\n"); // using the labels from the slice above
+          // todo: would be better to do this twice, once from below and once from above (limit the
+          // effect of direction) would also be good to look for bright pixel in the separating
+          // region, using image information would be better
+          fprintf(stdout,
+                  "SEPARATE THEM (using information from previous slice)!\n"); // using the labels from
+                                                                               // the slice above
         }
 
-        // if we have more than 2 objects, lets only use the largest 2, this ignores islands in single slices
-        // if (labelMapTmp->GetNumberOfLabelObjects() >= 2) {
-        // keep only the large connected component
+        // if we have more than 2 objects, lets only use the largest 2, this ignores islands in
+        // single slices if (labelMapTmp->GetNumberOfLabelObjects() >= 2) { keep only the large
+        // connected component
         typedef itk::LabelShapeKeepNObjectsImageFilter<ImageType> LabelShapeKeepNObjectsImageMaskFilterType;
         LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter3 = LabelShapeKeepNObjectsImageMaskFilterType::New();
         labelShapeKeepNObjectsImageFilter3->SetInput(connected4->GetOutput());
@@ -1181,14 +1212,17 @@ int main(int argc, char *argv[]) {
         if (labelMapTmp->GetNumberOfLabelObjects() == 0)
           continue; // we could end up here at the bottom of the stack
         //}
-        if (lungAreas == 1) { // we have 1 (or none) region, here we assume that we have a previous ok slice in label1 and label2
+        if (lungAreas == 1) { // we have 1 (or none) region, here we assume that we have a previous
+                              // ok slice in label1 and label2
           fprintf(stderr, "slice %d, single object, separate them now...\n", slice);
-          // the two objects are in lastTwoLungRegions and marked there with two different values (from connected4)
+          // the two objects are in lastTwoLungRegions and marked there with two different values
+          // (from connected4)
 
           // do a region growing on label1 and label2
           DilateFilterType::Pointer dilate = DilateFilterType::New();
           StructuringElementType structElement;
-          structElement.SetRadius(3); // 3x3 structuring element, larger radius will make the separation larger (depends on voxel size)
+          structElement.SetRadius(3); // 3x3 structuring element, larger radius will make the
+                                      // separation larger (depends on voxel size)
           structElement.CreateStructuringElement();
           dilate->SetKernel(structElement);
           dilate->SetDilateValue(1);
@@ -1203,17 +1237,19 @@ int main(int argc, char *argv[]) {
           tmpLabel2->DisconnectPipeline();
           label1 = tmpLabel1;
           label2 = tmpLabel2;
-          // now remove the overlap from the 'slice' mask (this should work if the images are sufficiently similar)
+          // now remove the overlap from the 'slice' mask (this should work if the images are
+          // sufficiently similar)
           ImageType::RegionType re = label1->GetLargestPossibleRegion();
           itk::ImageRegionIterator<MaskImageType> imIterator1(label1, re);
           itk::ImageRegionIterator<MaskImageType> imIterator2(label2, re);
-          itk::ImageRegionIterator<MaskImageType> dR(no_trachea, desiredRegion); // should be the location of the current slice in the whole volume
+          itk::ImageRegionIterator<MaskImageType> dR(no_trachea,
+                                                     desiredRegion); // should be the location of the current slice in the whole volume
           itk::ImageRegionIterator<ImageType> iR(inputImage, desiredRegion);
           int thresholdAir = -800;
           while (!imIterator1.IsAtEnd() && !imIterator2.IsAtEnd() && !dR.IsAtEnd()) {
             // fprintf(stdout, "Start iterating after dilation...\n");
-            if (imIterator1.Get() > 0 && imIterator2.Get() > 0 &&
-                iR.Get() > thresholdAir) { // this voxel is an overlap between the two slices, remove from our mask
+            if (imIterator1.Get() > 0 && imIterator2.Get() > 0 && iR.Get() > thresholdAir) { // this voxel is an overlap between the two slices,
+                                                                                             // remove from our mask
               // fprintf(stdout, "Found overlap voxel in no_trachea with label %d\n", dR.Get());
               dR.Set(0); // remove from no_trachea
               imIterator1.Set(0);
@@ -1225,13 +1261,15 @@ int main(int argc, char *argv[]) {
             ++iR;
           }
           // now we have changed the slice (hopefully they are separated now)
-          // we need to update the label1 and label2 regions again - because we have a new one for the next slice
+          // we need to update the label1 and label2 regions again - because we have a new one for
+          // the next slice
           extractFilter->SetExtractionRegion(desiredRegion);
           extractFilter->SetInput(no_trachea);
 
           //////////////////////////////////////////////////////////////////////////
           // we expect 2 distinct regions (the two lungs)
-          // as a sanity check we should make sure that we really have two large enough objects now - that the separation was successful
+          // as a sanity check we should make sure that we really have two large enough objects now
+          // - that the separation was successful
           ConnectedComponentImageFilterType::Pointer connected5 = ConnectedComponentImageFilterType::New();
           connected5->SetBackgroundValue(0);
           connected5->SetInput(extractFilter->GetOutput());
@@ -1244,8 +1282,8 @@ int main(int argc, char *argv[]) {
           LabelMapType *labelMapTmp2 = labelTmp2->GetOutput();
           fprintf(stdout, "after separation found %lu objects in slice, use the largest two only\n", labelMapTmp2->GetNumberOfLabelObjects());
 
-          // we expect to have two regions now - because the set(0) from above hopefully separated them, if not we should increase the structuring
-          // element and try again
+          // we expect to have two regions now - because the set(0) from above hopefully separated
+          // them, if not we should increase the structuring element and try again
           typedef itk::LabelShapeKeepNObjectsImageFilter<ImageType> LabelShapeKeepNObjectsImageMaskFilterType;
           LabelShapeKeepNObjectsImageMaskFilterType::Pointer labelShapeKeepNObjectsImageFilter4 = LabelShapeKeepNObjectsImageMaskFilterType::New();
           labelShapeKeepNObjectsImageFilter4->SetInput(connected5->GetOutput());
@@ -1256,7 +1294,8 @@ int main(int argc, char *argv[]) {
 
           twoLungRegions = labelShapeKeepNObjectsImageFilter4->GetOutput();
           connected4 = connected5; // we are looking at these in the next section
-                                   // this should be sufficient, the next part below is copying the values into label1 and label2 again for the next iteration
+                                   // this should be sufficient, the next part below is copying the
+                                   // values into label1 and label2 again for the next iteration
         }
 
         // remember the last slices regions (exactly 2 regions in here)
@@ -1306,27 +1345,29 @@ int main(int argc, char *argv[]) {
             ++imIterator2;
           }
         } else {
-          fprintf(stdout, "WE HAVE GIVEN UP HERE, single object even after separation!!! Increase separating size and try again?\n");
+          fprintf(stdout, "WE HAVE GIVEN UP HERE, single object even after separation!!! Increase "
+                          "separating size and try again?\n");
         }
         // we need to make sure that label1 and label2 look ok now
 
         //}
       }
 
-      // ok, if we did this right we should have now 2 separate regions of interest (left and right lung)
-      // input is no_trachea
+      // ok, if we did this right we should have now 2 separate regions of interest (left and right
+      // lung) input is no_trachea
       ConnectedComponentImageFilterType::Pointer connected_final_mask = ConnectedComponentImageFilterType::New();
       connected_final_mask->SetBackgroundValue(0);
       connected_final_mask->SetInput(no_trachea);
       connected_final_mask->Update();
 
-      // ToDo: we should check here which side is left/right to be able to name the lungs appropriately
+      // ToDo: we should check here which side is left/right to be able to name the lungs
+      // appropriately
       ImageType::Pointer finalLabelField = connected_final_mask->GetOutput();
 
       ////////////////////////////////////////////////////////////////////////////////////////////////////
-      // We did a 2D region growing before, we should do a 3D regions growing for each of the lungs next
-      // This would fill in the blood vessels better. Best would be a rolling ball filter here...
-      // We have to do this for each area in the lung seperately.
+      // We did a 2D region growing before, we should do a 3D regions growing for each of the lungs
+      // next This would fill in the blood vessels better. Best would be a rolling ball filter
+      // here... We have to do this for each area in the lung seperately.
       if (1) {
         std::vector<int> labelIds;
         MaskImageType::RegionType reg = finalLabelField->GetLargestPossibleRegion();
@@ -1474,7 +1515,8 @@ int main(int argc, char *argv[]) {
       }
 
       // write the original intensity image again only in the area where we have a label (>0)
-      // this should replace the previous extracted lung image because that one does not separate the lungs
+      // this should replace the previous extracted lung image because that one does not separate
+      // the lungs
       ImageType::Pointer lungDensity = ImageType::New();
       ImageType::RegionType lungDensityRegion = inputImage->GetLargestPossibleRegion();
       lungDensity->SetRegions(lungDensityRegion);
@@ -1626,7 +1668,8 @@ int main(int argc, char *argv[]) {
           ++inputIterator;
           ++finalIterator;
         }
-        // fprintf(stdout, "PhotometricInterpretation is: %d\n", fused->GetPhotometricInterpretation());
+        // fprintf(stdout, "PhotometricInterpretation is: %d\n",
+        // fused->GetPhotometricInterpretation());
 
         CWriterType::Pointer cwriter = CWriterType::New();
         // https://github.com/malaterre/GDCM/blob/master/Examples/Cxx/CreateARGBImage.cxx
@@ -1666,7 +1709,8 @@ int main(int argc, char *argv[]) {
             std::cerr << e.GetLocation() << std::endl;
             return EXIT_FAILURE;
           }
-          // ReaderType::DictionaryRawPointer inputDict = (*(reader->GetMetaDataDictionaryArray()))[0];
+          // ReaderType::DictionaryRawPointer inputDict =
+          // (*(reader->GetMetaDataDictionaryArray()))[0];
 
           InputImageType::Pointer inputImage = reader->GetOutput();
           InputImageType::RegionType region;
@@ -1717,13 +1761,15 @@ int main(int argc, char *argv[]) {
           auto end = dictionaryIn.End();
           //            itk::MetaDataDictionary outMetaData;
 
-          // create an image (see http://gdcm.sourceforge.net/html/GenFakeImage_8cxx-example.html#_a1)
+          // create an image (see
+          // http://gdcm.sourceforge.net/html/GenFakeImage_8cxx-example.html#_a1)
           gdcm::SmartPointer<gdcm::File> file = new gdcm::File; // empty file
           gdcm::FileDerivation fd;
           const char ReferencedSOPClassUID[] = "1.2.840.10008.5.1.4.1.1.7"; // Secondary Capture
           fd.AddReference(ReferencedSOPClassUID, frameOfReferenceUID.c_str());
           fd.SetPurposeOfReferenceCodeSequenceCodeValue(
-              121324); // segmentation  (see https://github.com/malaterre/GDCM/blob/master/Source/MediaStorageAndFileFormat/gdcmFileDerivation.cxx)
+              121324); // segmentation  (see
+                       // https://github.com/malaterre/GDCM/blob/master/Source/MediaStorageAndFileFormat/gdcmFileDerivation.cxx)
           // CID 7203 Image Derivation
           // { "DCM",113072,"Multiplanar reformatting" },
           fd.SetDerivationCodeSequenceCodeValue(113076);
@@ -1742,7 +1788,8 @@ int main(int argc, char *argv[]) {
             itk::MetaDataObjectBase::Pointer entry = itr->second;
             MetaDataStringType::Pointer entryvalue = dynamic_cast<MetaDataStringType *>(entry.GetPointer());
             if (entryvalue) {
-              //                itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D", newSeriesUID );
+              //                itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D",
+              //                newSeriesUID );
 
               // itk::EncapsulateMetaData<std::string>( dictionaryOut, entryId, value );
               // gdcm::DataElement d( gdcm::Tag(0x7fe0,0x0010) );
@@ -1795,8 +1842,8 @@ int main(int argc, char *argv[]) {
             }
             ++itr;
           }
-          //            itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D", newSeriesUID );
-          //            image.SetMetaDataDictionary( outMetaData );
+          //            itk::EncapsulateMetaData< std::string >( outMetaData, "0020|000D",
+          //            newSeriesUID ); image.SetMetaDataDictionary( outMetaData );
 
           // For the purpose of this execise we will pretend that this image is referencing
           // two source image (we need to generate fake UID for that).
@@ -1924,9 +1971,9 @@ int main(int argc, char *argv[]) {
         transform->SetIdentity();
         resampler->SetTransform(transform);
 
-        typedef itk::WindowedSincInterpolateImageFunction<ImageType, 3> WindowedSincInterpolatorType;
-        WindowedSincInterpolatorType::Pointer windowedSincInterpolator = WindowedSincInterpolatorType::New();
-        resampler->SetInterpolator(windowedSincInterpolator);
+        typedef itk::WindowedSincInterpolateImageFunction<ImageType, 3>
+        WindowedSincInterpolatorType; WindowedSincInterpolatorType::Pointer windowedSincInterpolator
+        = WindowedSincInterpolatorType::New(); resampler->SetInterpolator(windowedSincInterpolator);
 
         resampler->SetDefaultPixelValue(-1024); // Hounsfield Units for Air
 
@@ -1961,38 +2008,41 @@ int main(int argc, char *argv[]) {
         finalSize[1] = static_cast<SizeValueType>(dy);
         finalSize[2] = static_cast<SizeValueType>(dz);
 
-        fprintf(stdout, "finalSize of output is: %lu %lu %lu\n", finalSize[0], finalSize[1], finalSize[2]);
-        resampler->SetSize(finalSize);
-        resampler->SetInput(inputImage);
+        fprintf(stdout, "finalSize of output is: %lu %lu %lu\n", finalSize[0], finalSize[1],
+        finalSize[2]); resampler->SetSize(finalSize); resampler->SetInput(inputImage);
 
-        // Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
-        using HessianFilterType = itk::HessianRecursiveGaussianImageFilter<ImageType>;
-        HessianFilterType::Pointer hessianFilter = HessianFilterType::New();
-        hessianFilter->SetInput(resampler->GetOutput());
+        // Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large
+        negative values of $\lambda_3$ using HessianFilterType =
+        itk::HessianRecursiveGaussianImageFilter<ImageType>; HessianFilterType::Pointer
+        hessianFilter = HessianFilterType::New(); hessianFilter->SetInput(resampler->GetOutput());
         hessianFilter->SetSigma(static_cast<double>(1.0f));
         // now we need to get the three eigenvalues of the hessian to create our filter
         typedef itk::FixedArray<double, 3> EigenValueArrayType;
         typedef itk::Image<EigenValueArrayType, 3> EigenValueImageType;
 
-        typedef itk::SymmetricEigenAnalysisImageFilter<HessianFilterType::OutputImageType, EigenValueImageType> EigenAnalysisFilterType;
-        typename EigenAnalysisFilterType::Pointer m_SymmetricEigenValueFilter;
+        typedef itk::SymmetricEigenAnalysisImageFilter<HessianFilterType::OutputImageType,
+        EigenValueImageType> EigenAnalysisFilterType; typename EigenAnalysisFilterType::Pointer
+        m_SymmetricEigenValueFilter;
 
         m_SymmetricEigenValueFilter = EigenAnalysisFilterType::New();
         m_SymmetricEigenValueFilter->SetDimension(3);
         m_SymmetricEigenValueFilter->OrderEigenValuesBy(EigenAnalysisFilterType::FunctorType::OrderByValue);
         // sorting by value sorts from lowest (most negative to highest eigenvalue 01 < 02 < 03)
 
-        // m_SymmetricEigenValueFilter->OrderEigenValuesBy( EigenAnalysisFilterType::FunctorType::OrderByMagnitude );
+        // m_SymmetricEigenValueFilter->OrderEigenValuesBy(
+        EigenAnalysisFilterType::FunctorType::OrderByMagnitude );
 
         m_SymmetricEigenValueFilter->SetInput(hessianFilter->GetOutput());
         m_SymmetricEigenValueFilter->Update();
 
         typedef typename EigenAnalysisFilterType::OutputImageType EigenValueOutputImageType;
-        const typename EigenValueOutputImageType::ConstPointer eigenImage = m_SymmetricEigenValueFilter->GetOutput();
+        const typename EigenValueOutputImageType::ConstPointer eigenImage =
+        m_SymmetricEigenValueFilter->GetOutput();
 
         EigenValueArrayType eigenValue;
         itk::ImageRegionConstIterator<EigenValueOutputImageType> it;
-        it = itk::ImageRegionConstIterator<EigenValueOutputImageType>(eigenImage, eigenImage->GetLargestPossibleRegion());
+        it = itk::ImageRegionConstIterator<EigenValueOutputImageType>(eigenImage,
+        eigenImage->GetLargestPossibleRegion());
 
         // create a new output image for the eigenvalue filter result
         ImageType::Pointer vessels = ImageType::New();
@@ -2018,9 +2068,8 @@ int main(int argc, char *argv[]) {
         while (!it.IsAtEnd()) {
           // Get the eigen value
           eigenValue = it.Get();
-          a = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
-          if (a > maxS)
-            maxS = a;
+          a = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) +
+        (eigenValue[2] * eigenValue[2])); if (a > maxS) maxS = a;
           ++it;
         }
         // fprintf(stdout, "maxS : %f\n", maxS);
@@ -2041,20 +2090,27 @@ int main(int argc, char *argv[]) {
           double e1 = eigenValue[1];
           double e2 = eigenValue[2];
           //
-          //  Bright tubular structures will have low $\lambda_1$ and large negative values of $\lambda_2$ and $\lambda_3$.
-          //  Conversely dark tubular structures will have a low value of $\lambda_1$ and large positive values of $\lambda_2$ and $\lambda_3$.
-          //  Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large negative values of $\lambda_3$
-          //  Dark plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large positive values of $\lambda_3$
-          //  Bright spherical (blob) like structures have all three eigen values as large negative numbers
-          //  Dark spherical (blob) like structures have all three eigen values as large positive numbers
+          //  Bright tubular structures will have low $\lambda_1$ and large negative values of
+        $\lambda_2$ and $\lambda_3$.
+          //  Conversely dark tubular structures will have a low value of $\lambda_1$ and large
+        positive values of $\lambda_2$ and $\lambda_3$.
+          //  Bright plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large
+        negative values of $\lambda_3$
+          //  Dark plate like structures have low values of $\lambda_1$ and $\lambda_2$ and large
+        positive values of $\lambda_3$
+          //  Bright spherical (blob) like structures have all three eigen values as large negative
+        numbers
+          //  Dark spherical (blob) like structures have all three eigen values as large positive
+        numbers
           //
           // fprintf(stdout, "%f %f %f", e0, e1, e2);
-          double mag = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) + (eigenValue[2] * eigenValue[2]));
-          // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by magnitude
-          double Rb = .5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
-          double beta = 1;
+          double mag = sqrt((eigenValue[0] * eigenValue[0]) + (eigenValue[1] * eigenValue[1]) +
+        (eigenValue[2] * eigenValue[2]));
+          // double Rb = eigenValue[0] / ( .5 *(eigenValue[1] + eigenValue[2]) ); // if sort is by
+        magnitude double Rb = .5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]); double beta = 1;
           double scale = 1;
-          vesselIterator.Set(scale * std::exp(-.5 * Rb * Rb / (beta * beta)) * (1 - std::exp(-.5 * mag * mag / (ce * ce))));
+          vesselIterator.Set(scale * std::exp(-.5 * Rb * Rb / (beta * beta)) * (1 - std::exp(-.5 *
+        mag * mag / (ce * ce))));
 
           // wall like structures
           double av = .5 * (eigenValue[1] + eigenValue[2]);
@@ -2071,9 +2127,8 @@ int main(int argc, char *argv[]) {
             wallMax = Rw;
 
           // Rw = 0.5 * std::exp(-(1 - 0.7)) * std::fabs(eigenValue[0]);
-          // wallIterator.Set( scale * exp(-.5 * Rw * Rw / (beta * beta)) * (1 - exp(-.5 * mag * mag / (ce * ce))) + scale);
-          scale = 1;
-          wallIterator.Set(scale * Rw);
+          // wallIterator.Set( scale * exp(-.5 * Rw * Rw / (beta * beta)) * (1 - exp(-.5 * mag * mag
+        / (ce * ce))) + scale); scale = 1; wallIterator.Set(scale * Rw);
 
           ++it;
           ++vesselIterator;
@@ -2220,7 +2275,8 @@ int main(int argc, char *argv[]) {
           std::cerr << e.GetLocation() << std::endl;
           return EXIT_FAILURE;
         }
-        // ReaderType::DictionaryRawPointer inputDict = (*(reader->GetMetaDataDictionaryArray()))[0];
+        // ReaderType::DictionaryRawPointer inputDict =
+        // (*(reader->GetMetaDataDictionaryArray()))[0];
 
         InputImageType::Pointer inputImage = reader->GetOutput();
         InputImageType::RegionType region;
@@ -2306,6 +2362,14 @@ int main(int argc, char *argv[]) {
           resultJSON["output_images"].push_back(o.str());
         // std::cout << "done with writing the image...";
       }
+
+      // now we want to re-slice the left and right lung and export them again as a new volume (also
+      // as DICOM later) ImageType::Pointer finalLabelField ImageType::Pointer inputImage (this
+      // comes directly from the individual DICOM files)
+      ImageType::Pointer reslicedLung1 = computeReslice(inputImage, finalLabelField, 1, verbose); // 0 is for background, 3 for trachea
+      ImageType::Pointer reslicedLung2 = computeReslice(inputImage, finalLabelField, 2, verbose);
+      // and save the resulting image as another DICOM series
+
     } // loop over series
   } catch (itk::ExceptionObject &ex) {
     std::cout << ex << std::endl;
