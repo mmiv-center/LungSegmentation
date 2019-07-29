@@ -26,10 +26,7 @@
 //  0=success
 //  1=singular matrix
 //  2=a.rows != b.rows
-template <typename T> int LU_Solve(
-  boost::numeric::ublas::matrix<T>& a,
-  boost::numeric::ublas::matrix<T>& b )
-{
+template <typename T> int LU_Solve(boost::numeric::ublas::matrix<T> &a, boost::numeric::ublas::matrix<T> &b) {
   // This routine is originally based on the public domain draft for JAMA,
   // Java matrix package available at http://math.nist.gov/javanumerics/jama/
 
@@ -42,7 +39,7 @@ template <typename T> int LU_Solve(
 
   int m = a.size1(), n = a.size2();
   int pivsign = 0;
-  int* piv = (int*)alloca( sizeof(int) * m);
+  int *piv = (int *)alloca(sizeof(int) * m);
 
   // PART 1: DECOMPOSITION
   //
@@ -57,25 +54,23 @@ template <typename T> int LU_Solve(
     pivsign = 1;
 
     // Outer loop.
-    for (int j=0; j<n; ++j)
-    {
+    for (int j = 0; j < n; ++j) {
       // Make a copy of the j-th column to localize references.
-      Matrix_Col LUcolj(a,j);
+      Matrix_Col LUcolj(a, j);
 
       // Apply previous transformations.
-      for (int i = 0; i < m; ++i)
-      {
-          Matrix_Row LUrowi(a,i);
+      for (int i = 0; i < m; ++i) {
+        Matrix_Row LUrowi(a, i);
 
-          // This dot product is very expensive.
-          // Optimize for SSE2?
-          int kmax = (i<=j)?i:j;
-          typename Matrix_Row::const_iterator ri_ite( LUrowi.begin());
-          typename Matrix_Col::const_iterator cj_ite( LUcolj.begin());
-          typename Matrix::value_type sum = 0.0;
-          while( kmax-- > 0 )
-            sum += (*(ri_ite++)) * (*(cj_ite++));
-          LUrowi[j] = LUcolj[i] -= sum;
+        // This dot product is very expensive.
+        // Optimize for SSE2?
+        int kmax = (i <= j) ? i : j;
+        typename Matrix_Row::const_iterator ri_ite(LUrowi.begin());
+        typename Matrix_Col::const_iterator cj_ite(LUcolj.begin());
+        typename Matrix::value_type sum = 0.0;
+        while (kmax-- > 0)
+          sum += (*(ri_ite++)) * (*(cj_ite++));
+        LUrowi[j] = LUcolj[i] -= sum;
       }
 
       // Find pivot and exchange if necessary.
@@ -86,35 +81,27 @@ template <typename T> int LU_Solve(
       //      p = i;
       int p = j;
       typename Matrix::value_type coljp_abs = fabs(LUcolj[p]);
-      for ( typename Matrix_Col::const_iterator
-              beg = LUcolj.begin(),
-              ite = beg + j+1,
-              end = LUcolj.end();
-            ite < end;
-            ++ite )
-      {
-        if (fabs(*ite) > coljp_abs)
-        {
-          p = ite-beg;
+      for (typename Matrix_Col::const_iterator beg = LUcolj.begin(), ite = beg + j + 1, end = LUcolj.end(); ite < end; ++ite) {
+        if (fabs(*ite) > coljp_abs) {
+          p = ite - beg;
           coljp_abs = fabs(LUcolj[p]);
         }
       }
 
-      if (p != j)
-      {
-          Matrix_Row raj(a,j);
-          Matrix_Row(a,p).swap(raj);
+      if (p != j) {
+        Matrix_Row raj(a, j);
+        Matrix_Row(a, p).swap(raj);
 
-          int tmp = piv[p];
-          piv[p] = piv[j];
-          piv[j] = tmp;
-          pivsign = -pivsign;
+        int tmp = piv[p];
+        piv[p] = piv[j];
+        piv[j] = tmp;
+        pivsign = -pivsign;
       }
 
       // Compute multipliers.
-      if (j < m && a(j,j) != 0.0)
-          for (int i = j+1; i < m; ++i)
-            LUcolj[i] /= LUcolj[j];
+      if (j < m && a(j, j) != 0.0)
+        for (int i = j + 1; i < m; ++i)
+          LUcolj[i] /= LUcolj[j];
     }
   }
 
@@ -122,19 +109,16 @@ template <typename T> int LU_Solve(
 
   // Check singluarity
   for (int j = 0; j < n; ++j)
-    if (a(j,j) == 0)
+    if (a(j, j) == 0)
       return 1;
 
   // Reorder b according to pivotting
-  for (int i=0; i<m; ++i)
-  {
-    if ( piv[i] != i )
-    {
-      Matrix_Row b_ri( b, i );
-      Matrix_Row( b, piv[i] ).swap( b_ri );
-      for ( int j=i; j<m; ++j )
-        if ( piv[j] == i )
-        {
+  for (int i = 0; i < m; ++i) {
+    if (piv[i] != i) {
+      Matrix_Row b_ri(b, i);
+      Matrix_Row(b, piv[i]).swap(b_ri);
+      for (int j = i; j < m; ++j)
+        if (piv[j] == i) {
           piv[j] = piv[i];
           break;
         }
@@ -142,26 +126,22 @@ template <typename T> int LU_Solve(
   }
 
   // Solve L*Y = B(piv,:)
-  for (int k=0; k<n; ++k)
-  {
-    const Matrix_Row& b_rk = Matrix_Row( b, k );
-    for (int i = k+1; i < n; ++i)
-    {
-      const typename Matrix_Row::value_type aik = a(i,k);
-      Matrix_Row( b, i ) -= b_rk * aik;
+  for (int k = 0; k < n; ++k) {
+    const Matrix_Row &b_rk = Matrix_Row(b, k);
+    for (int i = k + 1; i < n; ++i) {
+      const typename Matrix_Row::value_type aik = a(i, k);
+      Matrix_Row(b, i) -= b_rk * aik;
     }
   }
 
   // Solve U*X = Y;
-  for (int k=n-1; k>=0; --k)
-  {
-    Matrix_Row(b,k) *= 1.0/a(k,k);
+  for (int k = n - 1; k >= 0; --k) {
+    Matrix_Row(b, k) *= 1.0 / a(k, k);
 
-    const Matrix_Row& b_rk = Matrix_Row(b, k );
-    for (int i=0; i<k; ++i)
-    {
-      const typename Matrix_Row::value_type aik = a(i,k);
-      Matrix_Row(b,i) -= b_rk * aik;
+    const Matrix_Row &b_rk = Matrix_Row(b, k);
+    for (int i = 0; i < k; ++i) {
+      const typename Matrix_Row::value_type aik = a(i, k);
+      Matrix_Row(b, i) -= b_rk * aik;
     }
   }
 
