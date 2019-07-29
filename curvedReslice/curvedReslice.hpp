@@ -18,6 +18,7 @@
 
 #include "../mytypes.h" // get the types required to access the image data
 #include "itkImageRegionIterator.h"
+#include "itkNearestNeighborInterpolateImageFunction.h"
 #include "linalg3d.h"
 #include "ludecomposition.h"
 #include <boost/numeric/ublas/matrix.hpp>
@@ -288,8 +289,8 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   /////////////////////////////////////////////////
   // compute bounding box in physical coordinates
   /////////////////////////////////////////////////
-  int bb[6]; // xmin, ymin, zmin, xmax, ymax, zmax in physical coordinates - to make the sampling on
-             // the final spline surface easier - geometrically correct
+  float bb[6]; // xmin, ymin, zmin, xmax, ymax, zmax in physical coordinates - to make the sampling on
+               // the final spline surface easier - geometrically correct
   bb[0] = bb[3] = final->GetOrigin()[0];
   bb[1] = bb[4] = final->GetOrigin()[1];
   bb[2] = bb[5] = final->GetOrigin()[2];
@@ -343,6 +344,23 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
           Vec(bb[0] + (bb[3] - bb[0]) / 2.0, bb[1] + h * ((bb[4] - bb[1]) / (CGRID_H - 1)), bb[2] + w * ((bb[5] - bb[2]) / (CGRID_W - 1))));
     }
   }
+  //////////////////////////////////////////////////////////////////////////////
+  // We also need a grid (finite sampling) for the computation of the metric.
+  // Strange thing here is that we will fix x and z. Only y will be provided by the
+  // thin-plate spline.
+  //////////////////////////////////////////////////////////////////////////////
+  int GRID_W = 100;
+  int GRID_H = 100;
+  // store the coordinates (x,z) but calculate the height value y later with interpolate_height from tps
+  matrix<Vec> grid_pos(GRID_W, GRID_H);
+  for (int w = 0; w < GRID_W; w++) {
+    for (int h = 0; h < GRID_H; h++) {
+      grid_pos(w, h).x = bb[0] + (bb[3] - bb[0]) / 2.0; // initially we have a flat sheet here - hope this will curve
+      grid_pos(w, h).y = bb[1] + h * ((bb[4] - bb[1]) / (GRID_H - 1));
+      grid_pos(w, h).z = bb[2] + w * ((bb[5] - bb[2]) / (GRID_W - 1));
+    }
+  }
+
   // this makes a copy of the control_points
   tpspline *tps = new tpspline(control_points);
 
@@ -362,10 +380,14 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
 
   struct Ftor {
     double expected_spacing[2];
-    float **grid;
+    matrix<Vec> *grid_pos;
     tpspline *tps; // needs to be set before calling the operator()
     int CGRID_W;
     int CGRID_H;
+    float *bb;
+    int labelFromLabelField;
+    // we  need access to the image volume as well - for sampling of intensities
+    ImageType::Pointer labelField;
 
     Doub operator()(VecDoub_I &x) const {
       // lets copy the values back to get a control_points array
@@ -402,21 +424,74 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
       // we can look at all the grid points now and calculate the normals
       int GRID_W = 100; // the resolution at which we compute the normals
       int GRID_H = 100;
+      PointType point;
+      ImageType::IndexType pixelIndex;
+
+      // we need to get voxel values from a position
+      double sum_dist = 0.0;                   // should be 0 in a perfect world - if location of spline is in each geometric mean of normal trace
+      int num_sum_dist = 0;                    // could now many samples we do and use the average to make the number smaller
       for (int w = 0; w < GRID_W - 1; w++) {   // this is a z-direction?
         for (int h = 0; h < GRID_H - 1; h++) { // this is the y-direction?
           // compute the normal at this point
-          // float a[] = {grid[h][w].x, grid[h][w].y, grid[h][w].z};
-          float b[] = {};
-          float c[] = {};
-          // float ab[] = V_MINUS(a, b);
-          // float cb[] = V_MINUS(c, b);
-          // float n[] = V_CROSS(cb, ab); // this is the normal
+          double a[] = {tps->interpolate_height(w, h), (*grid_pos)(w, h).x, (*grid_pos)(w, h).z};
+          double b[] = {tps->interpolate_height(w - 1, h), (*grid_pos)(w - 1, h).x, (*grid_pos)(w - 1, h).z};
+          double c[] = {tps->interpolate_height(w, h - 1), (*grid_pos)(w, h - 1).x, (*grid_pos)(w, h - 1).z};
+          double ab[] = V_MINUS(a, b);
+          double cb[] = V_MINUS(c, b);
+          double n[] = V_CROSS(cb, ab); // this is the normal
+                                        // now sample in the +- normal direction starting from a and report back the center of mass of the foreground object
+                                        // is n of length 1?
+          // sample the line - this should be done by linmin instead, would make this faster
+          double sum_weights = 0.0;
+          int num_samples = 0;
+          for (float weight = 0.0; weight < (bb[3] - b[0]); weight += 1.0) {
+            point[0] = a[0] + weight * n[0];
+            point[1] = a[1] + weight * n[1];
+            point[2] = a[2] + weight * n[2];
+
+            bool ok = labelField->TransformPhysicalPointToIndex(point, pixelIndex);
+            if (ok)
+              break;
+            unsigned int val = labelField->GetPixel(pixelIndex);
+            if (val != labelFromLabelField)
+              break;
+            sum_weights += weight;
+            num_samples++;
+          }
+          for (float weight = 0.0; weight < (bb[3] - b[0]); weight += 1.0) {
+            point[0] = a[0] - weight * n[0];
+            point[1] = a[1] - weight * n[1];
+            point[2] = a[2] - weight * n[2];
+
+            bool ok = labelField->TransformPhysicalPointToIndex(point, pixelIndex);
+            if (ok)
+              break;
+            unsigned int val = labelField->GetPixel(pixelIndex);
+            if (val != labelFromLabelField)
+              break;
+            sum_weights += weight;
+            num_samples++;
+          }
+          // ok we got now d1 and d2 as the distances at which we are outside of the slice, but what if we are outside
+          // to start with?, better to use the distance to the geometric mean on the line
+          if (num_samples == 0) {
+            // no point on this line, ignore this point
+            continue; // do the next controll point
+          }
+          sum_dist += (sum_weights / num_samples); // in the direction of n at a, could be 0 when samples balance in +-
+          num_sum_dist++;
         }
       }
       Doub metric = 0.0;
+      // what is the scale of these three parts? They should have equal size to make the metric use all three to optimize
+      // FIRST PART
+      metric += sum_dist / num_sum_dist;
       // SECOND PART
-      metric += tps->bending_energy;
+      metric += (0.01 * tps->bending_energy);
+      // THIRD PART
       metric += sum_spacing / count_spacings;
+      fprintf(stdout, "metric: center = %f, bending energy = %f, spacing = %f\n", sum_dist / num_sum_dist, (0.01 * tps->bending_energy),
+              sum_spacing / count_spacings);
 
       return metric;
     }
@@ -426,6 +501,10 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   f.tps = tps;
   f.CGRID_W = CGRID_W;
   f.CGRID_H = CGRID_H;
+  f.grid_pos = &grid_pos;
+  f.labelField = labelField;
+  f.bb = bb;
+  f.labelFromLabelField = labelFromLabelField;
   f.expected_spacing[0] = expected_spacing[0];
   f.expected_spacing[1] = expected_spacing[1];
 
@@ -444,6 +523,33 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   }
   tps->calc_tps();
   // now the final spline can be used to resample the data
+
+  for (int w = 0; w < GRID_W - 1; w++) {   // this is a z-direction?
+    for (int h = 0; h < GRID_H - 1; h++) { // this is the y-direction?
+      double a[] = {tps->interpolate_height(w, h), grid_pos(w, h).x, grid_pos(w, h).z};
+      // now set this point in the data to some value
+      final->SetPixel(pixelIndex, 4000);
+    }
+  }
+
+  if (1) { // debug output
+    typedef itk::ImageFileWriter<ImageType> WriterType;
+    WriterType::Pointer writer = WriterType::New();
+
+    // std::string a(labelfieldfilename + "trachea.nii");
+    writer->SetFileName("/tmp/debug.nii");
+    writer->SetInput(final);
+
+    std::cout << "Writing the final mask as " << std::endl;
+    std::cout << "/tmp/debug.nii" << std::endl;
+
+    try {
+      writer->Update();
+    } catch (itk::ExceptionObject &ex) {
+      std::cout << ex << std::endl;
+      return ImageType::Pointer();
+    }
+  }
 
   return ImageType::Pointer();
 }
