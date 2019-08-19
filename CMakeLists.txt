@@ -5,7 +5,14 @@ if(COMMAND CMAKE_POLICY)
 endif()
 
 #set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-4.8.1/bin)
-set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-5.0.0/bin)
+#set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-5.0.0/bin)
+if (EXISTS "/Users/hauke/src/itk/InsightToolkit-5.0.0/bin")
+  set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-5.0.0/bin)
+else()
+  set(ITK_DIR /opt/InsightToolkit-5.0.0/bin)
+endif()
+
+
 #SET(CMAKE_CXX_FLAGS "-std=c++0x")
 SET(CMAKE_CXX_FLAGS "-std=c++11")
 
