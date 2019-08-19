@@ -2375,7 +2375,7 @@ int main(int argc, char *argv[]) {
       // as DICOM later) ImageType::Pointer finalLabelField ImageType::Pointer inputImage (this
       // comes directly from the individual DICOM files)
       ImageType::Pointer reslicedLung1 = computeReslice(inputImage, finalLabelField, 1, verbose); // 0 is for background, 3 for trachea
-      ImageType::Pointer reslicedLung2 = computeReslice(inputImage, finalLabelField, 2, verbose);
+      //ImageType::Pointer reslicedLung2 = computeReslice(inputImage, finalLabelField, 2, verbose);
       // and save the resulting image as another DICOM series
 
     } // loop over series
