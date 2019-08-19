@@ -656,9 +656,9 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
         point[0] = grid_pos2(xx, y).y + (-255 + slice);
         // tps->interpolate_height(point[1], point[2]);
         ImageType::IndexType idx;
-        idx[0] = y;
-        idx[1] = x;
-        idx[2] = slice;
+        idx[0] = x;
+        idx[1] = slice;
+        idx[2] = y;
         bool ok = final->TransformPhysicalPointToIndex(point, pixelIndex);
         if (ok) {
           double val = final->GetPixel(pixelIndex);
