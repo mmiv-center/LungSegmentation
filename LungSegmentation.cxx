@@ -912,6 +912,8 @@ int main(int argc, char *argv[]) {
       unsigned int count = 0;
       unsigned int frontSize = 0;
       size = regionGrowingFieldRegion.GetSize();
+      int burnInSize = 50000 * (1.0 / (inputImage->GetSpacing()[0] * inputImage->GetSpacing()[1] * inputImage->GetSpacing()[2])) / (1.0 / (0.84 * 0.84 * 0.8));
+      resultJSON["trachea_burn_in_size"] = burnInSize;
       fprintf(stdout, "size of output: %lu %lu %lu\n", size[0], size[1], size[2]);
       while (1) {
         if (front.size() == 0)
@@ -1028,11 +1030,13 @@ int main(int argc, char *argv[]) {
         }
         // how long is the list in front? This burn in phase might not be required,
         // if we can add all pixel of the initial trachea into the region of interest
-        if (count == 50000) {
+        // problem here is that burn in should be different is we have larger voxel sizes
+        // we need a shorter burn in if we have voxel that are three times larger
+        if (count == burnInSize) {
           frontSize = front.size();
-          fprintf(stdout, "frontSize after 50000 is %d\n", frontSize);
+          fprintf(stdout, "frontSize after burn in size of %d is %d\n", burnInSize, frontSize);
         }
-        if (count > 50000) {
+        if (count > burnInSize) {
           // fprintf(stdout, "iteration on frontSize: %lu\n", front.size());
           if (front.size() > frontSize * 2) {
             // found the last entry
