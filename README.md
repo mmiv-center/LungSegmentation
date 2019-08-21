@@ -16,7 +16,7 @@ docker build -t lungsegmentation -f Dockerfile .
 ```
 and to run it using
 ```
-docker run --rm -it lungsegmentation
+> docker run --rm -it lungsegmentation
 Usage : ./LungSegmentation
  System tags: 
    [ -v ] or [ -h ]
@@ -48,6 +48,11 @@ Usage : ./LungSegmentation
    < outdir > 
       = Directory for output DICOM image series.
 ```
+In order to provide the data for processing the docker call should also include a '-v' to mount your data directory inside the docker container. Here an example call that assumes you have a 'data/folder_with_dicom' directory in your current directory. The following call will save the output in the same folder.
+```
+docker run --rm -it -v `pwd`/data:/data lungsegmentation /data/folder_with_dicom /data/folder_with_dicom_segmented
+```
+
 
 ### Debug build
 
