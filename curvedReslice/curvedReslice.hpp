@@ -189,7 +189,8 @@ public:
   }
 
 // should return a fitted thin-plate spline to the lung data for each lung area
-ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer labelField, int labelFromLabelField, bool verbose) {
+ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer labelField, int labelFromLabelField, bool showLeft, bool verbose,
+                                  ImageType::Pointer outVol) {
   // we need to place the initial spline with its control points in roughly the right orientation
   // that would be a sagittal orientation ontop of the bounding box of this lung object
   /////////////////////////////////////////////////
@@ -597,33 +598,37 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   }
 
   // ok, now we are ready to create a new Image object that will contain our sampled image information
-  ImageType::Pointer resliced = ImageType::New();
+  ImageType::Pointer resliced = outVol;
   ImageType::RegionType::SizeType size;
-  size[0] = 1024;
-  size[1] = 512;
-  size[2] = 512;
-  ImageType::RegionType::IndexType index; // lower left corner 1,1,1
-  index.Fill(0);
-  ImageType::RegionType region(index, size);
-  // we assume that our image data is centered on one side of the image
-  // because we want to combine left and right lung in one image
-  resliced->SetRegions(region);
-  resliced->Allocate();
-  // the image does not have a special origin
-  ImageType::PointType newOrigin;
-  newOrigin.Fill(0.0);
-  resliced->SetOrigin(newOrigin);
-
-  ImageType::DirectionType direction;
-  direction.SetIdentity();
-  resliced->SetDirection(direction);
-
   ImageType::SpacingType spacing;
-  // Units (e.g., mm, inches, etc.) are defined by the application.
-  spacing[0] = 1; // spacing along X
-  spacing[1] = 1; // spacing along Y
-  spacing[2] = 1; // spacing along Z
-  resliced->SetSpacing(spacing);
+  if (resliced == NULL) { // write into the provided outVol if its there, create a new one if not
+    resliced = ImageType::New();
+    size[0] = 1024;
+    size[1] = 512;
+    size[2] = 512;
+    ImageType::RegionType::IndexType index; // lower left corner 1,1,1
+    index.Fill(0);
+    ImageType::RegionType region(index, size);
+    // we assume that our image data is centered on one side of the image
+    // because we want to combine left and right lung in one image
+    resliced->SetRegions(region);
+    resliced->Allocate();
+    // the image does not have a special origin
+    ImageType::PointType newOrigin;
+    newOrigin.Fill(0.0);
+    resliced->SetOrigin(newOrigin);
+
+    ImageType::DirectionType direction;
+    direction.SetIdentity();
+    resliced->SetDirection(direction);
+
+    // Units (e.g., mm, inches, etc.) are defined by the application.
+    spacing[0] = 1; // spacing along X
+    spacing[1] = 1; // spacing along Y
+    spacing[2] = 1; // spacing along Z
+    resliced->SetSpacing(spacing);
+  }
+  double minSpacing = spacing[0] < spacing[1] ? (spacing[0] < spacing[2] ? spacing[2] : spacing[0]) : (spacing[1] < spacing[2] ? spacing[1] : spacing[2]);
 
   // ok we can sample the volume now by translating one slice in x direction
   // (better) we start with the voxel in the output and go backwards - would result in better quality images
@@ -641,24 +646,30 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
       grid_pos2(w, h).y = tps->interpolate_height(grid_pos2(w, h).x, grid_pos2(w, h).z);
     }
   }
-
+  // we have to do this seperately for left and right (showLeft is boolean)
   for (int slice = 0; slice < size[2]; slice++) {
     for (int y = 0; y < size[1]; y++) {
       for (int x = 0; x < size[0]; x++) { // 1024
         int offset_x = (x - 512);         // assumes 1mm slice distance
-        if (x < 512)
+        if (showLeft && x < 512)
+          continue;
+        if (!showLeft && x >= 512)
           continue;
         int xx = x - 512;
+        if (!showLeft)
+          xx = x;
         PointType point;
         ImageType::IndexType pixelIndex;
         point[1] = grid_pos2(xx, y).x;
         point[2] = grid_pos2(xx, y).z;
-        point[0] = grid_pos2(xx, y).y + (-255 + slice);
+        point[0] = grid_pos2(xx, y).y + (-255 + minSpacing); // pixel shift, but by what amount?
         // tps->interpolate_height(point[1], point[2]);
         ImageType::IndexType idx;
-        idx[0] = x;
-        idx[1] = slice;
-        idx[2] = y;
+        idx[0] = y + 512; // this is the wide direction, we want to rotate x and y, so its y with 512 added
+        if (!showLeft)
+          idx[0] = y;
+        idx[1] = xx;
+        idx[2] = slice;
         bool ok = final->TransformPhysicalPointToIndex(point, pixelIndex);
         if (ok) {
           double val = final->GetPixel(pixelIndex);

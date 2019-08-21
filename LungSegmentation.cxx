@@ -168,6 +168,9 @@ int main(int argc, char *argv[]) {
   command.SetOption("SaveNifty", "u", false, "Save the corrected dataset as a nifty image to the current directory");
   command.AddOptionField("SaveNifty", "niftyfilename", MetaCommand::STRING, true);
 
+  command.SetOption("SaveReslice", "r", false, "Save a resliced version of the data as DICOM");
+  command.AddOptionField("SaveReslice", "reslicefilename", MetaCommand::STRING, true);
+
   command.SetOption("Verbose", "V", false, "Print more verbose output");
 
   if (!command.Parse(argc, argv)) {
@@ -190,6 +193,10 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("SaveNifty")) {
     saveNifty = true;
     fprintf(stdout, "will save nifty\n");
+  }
+  std::string reslicefilename("");
+  if (command.GetOptionWasSet("SaveReslice")) {
+    reslicefilename = command.GetValueAsString("SaveReslice", "reslicefilename");
   }
   if (command.GetOptionWasSet("SeriesName"))
     seriesIdentifierFlag = true;
@@ -2374,9 +2381,12 @@ int main(int argc, char *argv[]) {
       // now we want to re-slice the left and right lung and export them again as a new volume (also
       // as DICOM later) ImageType::Pointer finalLabelField ImageType::Pointer inputImage (this
       // comes directly from the individual DICOM files)
-      ImageType::Pointer reslicedLung1 = computeReslice(inputImage, finalLabelField, 1, verbose); // 0 is for background, 3 for trachea
-      //ImageType::Pointer reslicedLung2 = computeReslice(inputImage, finalLabelField, 2, verbose);
-      // and save the resulting image as another DICOM series
+      // (showLeft true for label 1)
+      if (command.GetOptionWasSet("SaveReslice")) {
+        ImageType::Pointer reslicedLung1 = computeReslice(inputImage, finalLabelField, 1, true, verbose, nullptr); // 0 is for background, 3 for trachea
+        ImageType::Pointer reslicedLung2 = computeReslice(inputImage, finalLabelField, 2, false, verbose, reslicedLung1);
+        // and save the resulting image as another DICOM series
+      }
 
     } // loop over series
   } catch (itk::ExceptionObject &ex) {
