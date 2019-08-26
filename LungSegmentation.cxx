@@ -201,6 +201,10 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("SeriesName"))
     seriesIdentifierFlag = true;
   std::string labelfieldfilename = command.GetValueAsString("SaveLabelfield", "labelfieldfilename");
+  // todo: the argument could not be there, in this case the labelfieldfilename might be empty
+  if (!saveLabelField) {
+    labelfieldfilename = output + "/label_field.nii";
+  }
   std::string niftyfilename = command.GetValueAsString("SaveNifty", "niftyfilename");
   std::string niftyfilename2 = niftyfilename + "_walls.nii";
   size_t lastdot = niftyfilename.find_last_of(".");
@@ -1193,7 +1197,7 @@ int main(int argc, char *argv[]) {
           // fprintf(stdout, "is this a lung? (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n,
           // labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
         }
-        fprintf(stdout, "FOUND %d lung area%s\n", lungAreas, lungAreas != 1 ? "s" : "");
+        fprintf(stdout, "FOUND %d lung area%s\t", lungAreas, lungAreas != 1 ? "s" : "");
         if (lungAreas == 1) {
           // todo: would be better to do this twice, once from below and once from above (limit the
           // effect of direction) would also be good to look for bright pixel in the separating

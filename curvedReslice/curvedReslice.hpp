@@ -344,7 +344,7 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
 
   // http://numerical.recipes/forumarchive/index.php/t-1360.html
   const int NDIM = control_points.size(); // only height is adjusted
-  const Doub GTOL = 1.0e-4;
+  const Doub GTOL = 1.0e-3;
   int iter;
   Doub fret;
   VecDoub_IO p(NDIM);
@@ -552,6 +552,7 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   }
   fprintf(stdout, "start dfpmin with %f %f %f %f...\n", p[0], p[1], p[2], p[3]);
   dfpmin(p, GTOL, iter, fret, aa);
+  fprintf(stdout, "done with: %d iterations\n", iter);
   // copy the updated control points back to the spline - we can use them later to sample the volume
   for (int i = 0; i < control_points.size(); i++) {
     //    control_points[i].x = p[i * 3 + 0];
@@ -633,16 +634,23 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   // ok we can sample the volume now by translating one slice in x direction
   // (better) we start with the voxel in the output and go backwards - would result in better quality images
   // what is our offset?
+  // we only have to invert the transformation for the current slice (2d) and duplicate for the other slices
   GRID_W = 512;
   GRID_H = 512;
   double padding = 5; // a 5 voxel padding on the border
   // store the coordinates (x,z) but calculate the height value y later with interpolate_height from tps
+  // we want to have the same voxel size in w and in h, given 512 pixel resolution what is the voxel we can get for the
+  // whole bounding box (the larger of the two defines the vx, copy to the smaller and keep centered)
+  double vh = ((bb[4] + padding) - (bb[1] - padding)) / (GRID_H - 1);
+  double vw = ((bb[5] + padding) - (bb[2] - padding)) / (GRID_W - 1);
+  double voxel_size = vh < vw ? vw : vh; // use the smaller voxel size because lung is bigger in that direction
+
   matrix<Vec> grid_pos2(GRID_W, GRID_H);
   for (int w = 0; w < GRID_W; w++) {
     for (int h = 0; h < GRID_H; h++) {
-      grid_pos2(w, h).x =
-          (bb[1] - padding) + h * (((bb[4] + padding) - (bb[1] - padding)) / (GRID_H - 1)); // initially we have a flat sheet here - hope this will curve
-      grid_pos2(w, h).z = (bb[2] - padding) + w * (((bb[5] + padding) - (bb[2] - padding)) / (GRID_W - 1));
+      grid_pos2(w, h).x = ((bb[4] + padding) - (GRID_H * voxel_size)) +
+                          h * voxel_size; //(bb[1] - padding) + h * voxel_size; // initially we have a flat sheet here - hope this will curve
+      grid_pos2(w, h).z = ((bb[5] + padding) - (GRID_W * voxel_size)) + w * voxel_size; //(bb[2] - padding) + w * voxel_size;
       grid_pos2(w, h).y = tps->interpolate_height(grid_pos2(w, h).x, grid_pos2(w, h).z);
     }
   }
@@ -650,26 +658,33 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
   for (int slice = 0; slice < size[2]; slice++) {
     for (int y = 0; y < size[1]; y++) {
       for (int x = 0; x < size[0]; x++) { // 1024
-        int offset_x = (x - 512);         // assumes 1mm slice distance
+        // int offset_x = (x - 512);         // assumes 1mm slice distance
         if (showLeft && x < 512)
-          continue;
+          continue; // skip these voxel, only copy values into 511...
         if (!showLeft && x >= 512)
           continue;
-        int xx = x - 512;
-        if (!showLeft)
-          xx = x;
+        int xx = x;
+        if (showLeft)
+          xx = x - 512;
         PointType point;
         ImageType::IndexType pixelIndex;
         point[1] = grid_pos2(xx, y).x;
         point[2] = grid_pos2(xx, y).z;
-        point[0] = grid_pos2(xx, y).y + (-255 + minSpacing); // pixel shift, but by what amount?
+        point[0] = grid_pos2(xx, y).y + (-((512.0 * voxel_size) / 2.0) + slice * voxel_size); // pixel shift, but by what amount?
         // tps->interpolate_height(point[1], point[2]);
         ImageType::IndexType idx;
-        idx[0] = y + 512; // this is the wide direction, we want to rotate x and y, so its y with 512 added
-        if (!showLeft)
-          idx[0] = y;
+        idx[0] = 0; // this is the wide direction, we want to rotate x and y, so its y with 512 added
+        if (!showLeft) {
+          idx[0] = y; // we would like to align them on the opposite end, both with showLeft and with !showLeft, should probably be done above in setting the
+                      // bounding box
+        } else {
+          idx[0] = 512 + (511 - y);
+        }
         idx[1] = xx;
         idx[2] = slice;
+        // if (!showLeft)
+        //  idx[2] = 511 - slice;
+        // invert the z axis for the smaller !showLeft
         bool ok = final->TransformPhysicalPointToIndex(point, pixelIndex);
         if (ok) {
           double val = final->GetPixel(pixelIndex);
