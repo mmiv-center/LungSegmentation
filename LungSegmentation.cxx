@@ -60,6 +60,7 @@
 #include "itkMetaDataDictionary.h"
 #include "json.hpp"
 #include "metaCommand.h"
+#include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
 #include <map>
 
@@ -141,13 +142,15 @@ template <typename TValue> std::vector<TValue> ConvertVector(std::string optionS
 json resultJSON;
 
 int main(int argc, char *argv[]) {
+  boost::posix_time::ptime timeLocal = boost::posix_time::second_clock::local_time();
+  resultJSON["run_date_time"] = to_simple_string(timeLocal);
 
   itk::MultiThreaderBase::SetGlobalMaximumNumberOfThreads(4);
 
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
   command.SetDescription("LungSegmentation on CT DICOM images. Read DICOM image series and perform "
-                         "a lung segmentation. Exports a new DICOM series.");
+                         "a lung segmentation into left, right and trachea regions of interest. Exports a new DICOM series.");
   command.AddField("indir", "Directory with input DICOM image series.", MetaCommand::STRING, true);
   command.AddField("outdir", "Directory for output DICOM image series.", MetaCommand::STRING, true);
 
@@ -169,7 +172,9 @@ int main(int argc, char *argv[]) {
   command.AddOptionField("SaveNifty", "niftyfilename", MetaCommand::STRING, true);
 
   command.SetOption("SaveReslice", "r", false, "Save a resliced version of the data as DICOM");
-  command.AddOptionField("SaveReslice", "reslicefilename", MetaCommand::STRING, true);
+  // command.AddOptionField("SaveReslice", "reslicefilename", MetaCommand::STRING, true);
+
+  command.SetOption("Force", "f", false, "Ignore existing directories and force reprocessing. Default is to stop processing if directory already exists.");
 
   command.SetOption("Verbose", "V", false, "Print more verbose output");
 
@@ -183,6 +188,9 @@ int main(int argc, char *argv[]) {
   bool verbose = false;
   if (command.GetOptionWasSet("Verbose"))
     verbose = true;
+  bool force = false;
+  if (command.GetOptionWasSet("Force"))
+    force = true;
 
   bool saveLabelField = false;
   bool saveNifty = false;
@@ -194,10 +202,10 @@ int main(int argc, char *argv[]) {
     saveNifty = true;
     fprintf(stdout, "will save nifty\n");
   }
-  std::string reslicefilename("");
-  if (command.GetOptionWasSet("SaveReslice")) {
-    reslicefilename = command.GetValueAsString("SaveReslice", "reslicefilename");
-  }
+  // std::string reslicefilename("");
+  // if (command.GetOptionWasSet("SaveReslice")) {
+  //  reslicefilename = command.GetValueAsString("SaveReslice", "reslicefilename");
+  //}
   if (command.GetOptionWasSet("SeriesName"))
     seriesIdentifierFlag = true;
   std::string labelfieldfilename = command.GetValueAsString("SaveLabelfield", "labelfieldfilename");
@@ -242,6 +250,7 @@ int main(int argc, char *argv[]) {
 
   typedef itk::GDCMImageIO ImageIOType;
   ImageIOType::Pointer dicomIO = ImageIOType::New();
+  dicomIO->LoadPrivateTagsOn();
 
   reader->SetImageIO(dicomIO);
 
@@ -254,9 +263,6 @@ int main(int argc, char *argv[]) {
   nameGenerator->SetDirectory(input);
 
   try {
-    std::cout << "Found DICOM Series: ";
-    std::cout << std::endl;
-
     typedef std::vector<std::string> SeriesIdContainer;
 
     const SeriesIdContainer &seriesUID = nameGenerator->GetSeriesUIDs();
@@ -264,6 +270,8 @@ int main(int argc, char *argv[]) {
     SeriesIdContainer::const_iterator seriesItr = seriesUID.begin();
     SeriesIdContainer::const_iterator seriesEnd = seriesUID.end();
     while (seriesItr != seriesEnd) {
+      std::cout << "Found DICOM Series: ";
+      std::cout << std::endl;
       std::cout << "  " << seriesItr->c_str() << std::endl;
       ++seriesItr;
     }
@@ -302,7 +310,7 @@ int main(int argc, char *argv[]) {
       std::cout << "  " << seriesIdentifier << std::endl;
 
       std::string outputSeries = output + "/" + seriesIdentifier;
-      if (itksys::SystemTools::FileIsDirectory(outputSeries.c_str())) {
+      if (!force && itksys::SystemTools::FileIsDirectory(outputSeries.c_str())) {
         fprintf(stdout, "Skip this series %s, output directory exists already...\n", outputSeries.c_str());
         exit(0);
       }
@@ -326,6 +334,7 @@ int main(int argc, char *argv[]) {
       // if we want to write them back out we have to read them slice by
       // slice and get a copy of the meta data for each slice
       reader->SetFileNames(fileNames);
+      reader->ForceOrthogonalDirectionOff(); // do we need this?
 
       try {
         reader->Update();
@@ -337,16 +346,53 @@ int main(int argc, char *argv[]) {
       // read the data dictionary
       ImageType::Pointer inputImage = reader->GetOutput();
       typedef itk::MetaDataDictionary DictionaryType;
-      DictionaryType &dictionary = inputImage->GetMetaDataDictionary();
+      DictionaryType &dictionary = dicomIO->GetMetaDataDictionary();
       fprintf(stdout, "pixel spacing of input is: %f %f %f\n", inputImage->GetSpacing()[0], inputImage->GetSpacing()[1], inputImage->GetSpacing()[2]);
       // overwrite a value in the dicom dictionary
       // std::string entryId( "0010|0010" );
       // std::string value( "MYNAME" );
       // itk::EncapsulateMetaData<std::string>( dictionary, entryId, value );
 
-      //
-      // replace this with the N4 algorithm instead of the gaussian filter
-      //
+      std::string studyDescription;
+      std::string seriesDescription;
+      std::string patientID;
+      std::string patientName;
+      std::string sopClassUID;
+      std::string seriesDate;
+      std::string seriesTime;
+      std::string studyDate;
+      std::string studyTime;
+      std::string patientSex;
+      std::string convolutionKernelGroup;
+      std::string modality;
+      std::string manufacturer;
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|1030", studyDescription))
+        resultJSON["SeriesDescription"] = boost::algorithm::trim_copy(seriesDescription);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|103e", seriesDescription))
+        resultJSON["StudyDescription"] = boost::algorithm::trim_copy(studyDescription);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID))
+        resultJSON["SOPClassUID"] = boost::algorithm::trim_copy(sopClassUID);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0021", seriesDate))
+        resultJSON["StudyDate"] = boost::algorithm::trim_copy(studyDate);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0031", seriesTime))
+        resultJSON["SeriesTime"] = boost::algorithm::trim_copy(seriesTime);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0010|0020", patientID))
+        resultJSON["PatientID"] = boost::algorithm::trim_copy(patientID);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0010|0010", patientName))
+        resultJSON["PatientName"] = boost::algorithm::trim_copy(patientName);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0010|0040", patientSex))
+        resultJSON["PatientSex"] = boost::algorithm::trim_copy(patientSex);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0030", studyTime))
+        resultJSON["StudyTime"] = boost::algorithm::trim_copy(studyTime);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0020", studyDate))
+        resultJSON["SeriesDate"] = boost::algorithm::trim_copy(seriesDate);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0018|9316", convolutionKernelGroup))
+        resultJSON["CTConvolutionKernelGroup"] = boost::algorithm::trim_copy(convolutionKernelGroup); // LUNG, BRAIN, BONE, SOFT_TISSUE
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0060", modality))
+        resultJSON["Modality"] = boost::algorithm::trim_copy(modality);
+      if (itk::ExposeMetaData<std::string>(dictionary, "0008|0080", manufacturer))
+        resultJSON["Manufacturer"] = boost::algorithm::trim_copy(manufacturer);
+
       MaskImageType::Pointer maskImage;
 
       // if we have a mask on the command line
@@ -718,6 +764,10 @@ int main(int argc, char *argv[]) {
       resultJSON["voxel_size"].push_back(spacingx);
       resultJSON["voxel_size"].push_back(spacingy);
       resultJSON["voxel_size"].push_back(spacingz);
+      resultJSON["data_dims"] = json::array();
+      resultJSON["data_dims"].push_back(inputImage->GetLargestPossibleRegion().GetSize()[0]);
+      resultJSON["data_dims"].push_back(inputImage->GetLargestPossibleRegion().GetSize()[1]);
+      resultJSON["data_dims"].push_back(inputImage->GetLargestPossibleRegion().GetSize()[2]);
 
       // in liters
       resultJSON["lung_volume"] = numberOfPixel * spacingx * spacingy * spacingz * 1e-6;
@@ -1197,7 +1247,7 @@ int main(int argc, char *argv[]) {
           // fprintf(stdout, "is this a lung? (>0.2l) object: %d has %0.4f liters, %lu voxel\n", n,
           // labelObject->GetPhysicalSize() / 1000000, labelObject->GetNumberOfPixels());
         }
-        fprintf(stdout, "FOUND %d lung area%s\t", lungAreas, lungAreas != 1 ? "s" : "");
+        // fprintf(stdout, "FOUND %d lung area%s\t", lungAreas, lungAreas != 1 ? "s" : "");
         if (lungAreas == 1) {
           // todo: would be better to do this twice, once from below and once from above (limit the
           // effect of direction) would also be good to look for bright pixel in the separating
@@ -1514,6 +1564,10 @@ int main(int argc, char *argv[]) {
         else
           a = labelfieldfilename.substr(0, lastdot) + "_separated.nii";
 
+        // make sure we can create that path
+        path p(a);
+        create_directories(p.parent_path());
+
         // std::string a(labelfieldfilename + "trachea.nii");
         writer->SetFileName(a);
         writer->SetInput(finalLabelField /* no_trachea */);
@@ -1771,7 +1825,7 @@ int main(int argc, char *argv[]) {
 
           // now copy all the DICOM tags over
           using DictionaryType = itk::MetaDataDictionary;
-          const DictionaryType &dictionaryIn = inputImage->GetMetaDataDictionary();
+          const DictionaryType &dictionaryIn = dicomIO->GetMetaDataDictionary();
           using MetaDataStringType = itk::MetaDataObject<std::string>;
           auto itr = dictionaryIn.Begin();
           auto end = dictionaryIn.End();
@@ -2315,7 +2369,7 @@ int main(int argc, char *argv[]) {
         memcpy(buffer2, &(buffer3[i * size[0] * size[1]]), size[0] * size[1] * bla);
 
         typedef itk::MetaDataDictionary DictionaryType;
-        DictionaryType &dictionary = inputImage->GetMetaDataDictionary();
+        DictionaryType &dictionary = dicomIO->GetMetaDataDictionary();
 
         std::string studyUID;
         std::string sopClassUID;

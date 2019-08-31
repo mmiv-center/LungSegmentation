@@ -19,6 +19,7 @@
 #include "../mytypes.h" // get the types required to access the image data
 #include "itkImageRegionIterator.h"
 #include "itkNearestNeighborInterpolateImageFunction.h"
+#include "itkWarpImageFilter.h"
 #include "linalg3d.h"
 #include "ludecomposition.h"
 #include <boost/numeric/ublas/matrix.hpp>
@@ -598,6 +599,14 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
     }
   }
 
+  GRID_W = 512;
+  GRID_H = 512;
+  double padding = 5; // a 5 mm padding on the border
+
+  double vh = ((bb[4] + padding) - (bb[1] - padding)) / (GRID_H - 1);
+  double vw = ((bb[5] + padding) - (bb[2] - padding)) / (GRID_W - 1);
+  double voxel_size = vh < vw ? vw : vh; // use the smaller voxel size because lung is bigger in that direction
+
   // ok, now we are ready to create a new Image object that will contain our sampled image information
   ImageType::Pointer resliced = outVol;
   ImageType::RegionType::SizeType size;
@@ -623,37 +632,48 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
     direction.SetIdentity();
     resliced->SetDirection(direction);
 
-    // Units (e.g., mm, inches, etc.) are defined by the application.
-    spacing[0] = 1; // spacing along X
-    spacing[1] = 1; // spacing along Y
-    spacing[2] = 1; // spacing along Z
+    // if we have to create this file we will calculate some voxel size first (minimum choice)
+    spacing[0] = voxel_size; // spacing along X
+    spacing[1] = voxel_size; // spacing along Y
+    spacing[2] = voxel_size; // spacing along Z
     resliced->SetSpacing(spacing);
+  } else {
+    // if we have a volume in the input, use its voxel size instead of the calculated one
+    voxel_size = resliced->GetSpacing()[0]; // assume that we have isotropic voxel
   }
-  double minSpacing = spacing[0] < spacing[1] ? (spacing[0] < spacing[2] ? spacing[2] : spacing[0]) : (spacing[1] < spacing[2] ? spacing[1] : spacing[2]);
 
   // ok we can sample the volume now by translating one slice in x direction
   // (better) we start with the voxel in the output and go backwards - would result in better quality images
   // what is our offset?
   // we only have to invert the transformation for the current slice (2d) and duplicate for the other slices
-  GRID_W = 512;
-  GRID_H = 512;
-  double padding = 5; // a 5 voxel padding on the border
   // store the coordinates (x,z) but calculate the height value y later with interpolate_height from tps
   // we want to have the same voxel size in w and in h, given 512 pixel resolution what is the voxel we can get for the
   // whole bounding box (the larger of the two defines the vx, copy to the smaller and keep centered)
-  double vh = ((bb[4] + padding) - (bb[1] - padding)) / (GRID_H - 1);
-  double vw = ((bb[5] + padding) - (bb[2] - padding)) / (GRID_W - 1);
-  double voxel_size = vh < vw ? vw : vh; // use the smaller voxel size because lung is bigger in that direction
 
   matrix<Vec> grid_pos2(GRID_W, GRID_H);
   for (int w = 0; w < GRID_W; w++) {
     for (int h = 0; h < GRID_H; h++) {
-      grid_pos2(w, h).x = ((bb[4] + padding) - (GRID_H * voxel_size)) +
-                          h * voxel_size; //(bb[1] - padding) + h * voxel_size; // initially we have a flat sheet here - hope this will curve
-      grid_pos2(w, h).z = ((bb[5] + padding) - (GRID_W * voxel_size)) + w * voxel_size; //(bb[2] - padding) + w * voxel_size;
-      grid_pos2(w, h).y = tps->interpolate_height(grid_pos2(w, h).x, grid_pos2(w, h).z);
+      // go to the ned of the volume (back of the body) and start the bounding box there (plus padding)
+      grid_pos2(w, h).x = ((bb[4] + padding) - (GRID_H * voxel_size)) + h * voxel_size;  //(bb[1] - padding) + h * voxel_size;
+      grid_pos2(w, h).z = ((bb[5] + padding) - (GRID_W * voxel_size)) + w * voxel_size;  //(bb[2] - padding) + w * voxel_size;
+      grid_pos2(w, h).y = tps->interpolate_height(grid_pos2(w, h).x, grid_pos2(w, h).z); // initially we have a flat sheet here - hope this will curve
     }
   }
+  // We want to sample the original data using a displacement field because that will give us
+  // tri-linear interpolations. So we need to create a displacement field first and apply it with a Warp.
+  // Create the displacement field:
+  using VectorComponentType = float;
+  using VectorPixelType = itk::Vector<VectorComponentType, 3>;
+  using DisplacementFieldType = itk::Image<VectorPixelType, 3>;
+  DisplacementFieldType::Pointer deformationField = DisplacementFieldType::New();
+  deformationField->SetOrigin(resliced->GetOrigin());
+  deformationField->SetSpacing(resliced->GetSpacing());
+  deformationField->SetRegions(resliced->GetLargestPossibleRegion());
+  deformationField->SetDirection(resliced->GetDirection());
+  deformationField->Allocate();
+  VectorPixelType zeros(0.0);
+  deformationField->FillBuffer(zeros);
+
   // we have to do this seperately for left and right (showLeft is boolean)
   for (int slice = 0; slice < size[2]; slice++) {
     for (int y = 0; y < size[1]; y++) {
@@ -685,7 +705,13 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
         // if (!showLeft)
         //  idx[2] = 511 - slice;
         // invert the z axis for the smaller !showLeft
-        bool ok = final->TransformPhysicalPointToIndex(point, pixelIndex);
+        VectorPixelType ppoint;
+        ppoint[0] = -point[0]; // we need the inverse orientation
+        ppoint[1] = point[1];
+        ppoint[2] = point[2];
+        deformationField->SetPixel(idx, ppoint);
+
+        bool ok = final->TransformPhysicalPointToIndex(point, pixelIndex); // sample here with tri-linear interpolation instead of nearest neighbor
         if (ok) {
           double val = final->GetPixel(pixelIndex);
           // set this pixel into the current location
@@ -693,6 +719,42 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
         } else {
           resliced->SetPixel(idx, -1024);
         }
+      }
+    }
+  }
+
+  // now apply the deformationField to the data (but only in the region that is active for the current run left/right)
+  using WarpFilterType = itk::WarpImageFilter<ImageType, ImageType, DisplacementFieldType>;
+  WarpFilterType::Pointer warpFilter = WarpFilterType::New();
+  using InterpolatorType = itk::LinearInterpolateImageFunction<ImageType, double>;
+  InterpolatorType::Pointer interpolator = InterpolatorType::New();
+  warpFilter->SetInterpolator(interpolator);
+  warpFilter->SetOutputSpacing(deformationField->GetSpacing());
+  warpFilter->SetOutputOrigin(deformationField->GetOrigin());
+  warpFilter->SetOutputDirection(deformationField->GetDirection());
+  warpFilter->SetDisplacementField(deformationField);
+  warpFilter->SetInput(final);
+  warpFilter->Update();
+  ImageType::Pointer warpedVol = warpFilter->GetOutput();
+  // we apply the filter on all voxel, but we only want them for half the image, we can copy the once
+  // we want to reslice now
+  for (int slice = 0; slice < size[2]; slice++) {
+    for (int y = 0; y < size[1]; y++) {
+      for (int x = 0; x < size[0]; x++) { // 1024
+        // int offset_x = (x - 512);         // assumes 1mm slice distance
+        if (showLeft && x < 512)
+          continue; // skip these voxel, only copy values into 511...
+        if (!showLeft && x >= 512)
+          continue;
+        int xx = x;
+        if (showLeft)
+          xx = x - 512;
+        ImageType::IndexType idx;
+        idx[0] = y;
+        idx[1] = xx;
+        idx[2] = slice;
+        float val = warpedVol->GetPixel(idx);
+        resliced->SetPixel(idx, val);
       }
     }
   }
