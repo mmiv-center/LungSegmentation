@@ -9,7 +9,7 @@ endif()
 if (EXISTS "/Users/hauke/src/itk/InsightToolkit-5.0.0/bin")
   set(ITK_DIR /Users/hauke/src/itk/InsightToolkit-5.0.0/bin)
 else()
-  set(ITK_DIR /opt/InsightToolkit-5.0.0/bin)
+  set(ITK_DIR /opt/InsightToolkit-5.0.1/bin)
 endif()
 
 
