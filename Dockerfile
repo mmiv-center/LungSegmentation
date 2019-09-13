@@ -2,7 +2,7 @@ FROM ubuntu:18.04
 
 RUN apt-get update -qq && apt-get install -yq build-essential \
     cmake git wget libboost-filesystem1.62-dev libboost-timer1.62-dev \
-    libboost-system1.62-dev
+    libboost-system1.62-dev libboost-date-time1.62-dev
 
 # install itk
 RUN cd /tmp/ \
