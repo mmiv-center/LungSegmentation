@@ -750,7 +750,7 @@ ImageType::Pointer computeReslice(ImageType::Pointer final, ImageType::Pointer l
         if (showLeft)
           xx = x - 512;
         ImageType::IndexType idx;
-        idx[0] = y;
+        idx[0] = y; // this is the wide direction, we want to rotate x and y, so its y with 512 added
         idx[1] = xx;
         idx[2] = slice;
         float val = warpedVol->GetPixel(idx);
