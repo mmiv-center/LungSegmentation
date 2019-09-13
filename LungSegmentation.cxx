@@ -62,6 +62,7 @@
 #include "metaCommand.h"
 #include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/algorithm/string.hpp>
 #include <map>
 
 #include "mytypes.h"
@@ -324,7 +325,7 @@ int main(int argc, char *argv[]) {
         std::cout << "skip processing, not enough images in this series..." << std::endl;
         continue;
       }
-      fprintf(stdout, "sufficient number of images [%lu] in this series, start processing...\n", fileNames.size());
+      fprintf(stdout, "[sufficient number of images [%lu] in this series]\n", fileNames.size());
       resultJSON["series_identifier"] = seriesIdentifier;
       // for (int i = 0; i < fileNames.size(); i++) {
       //  resultJSON["file_names"].push_back(fileNames[i]);
