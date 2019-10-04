@@ -60,9 +60,9 @@
 #include "itkMetaDataDictionary.h"
 #include "json.hpp"
 #include "metaCommand.h"
+#include <boost/algorithm/string.hpp>
 #include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/algorithm/string.hpp>
 #include <map>
 
 #include "mytypes.h"
@@ -1582,6 +1582,140 @@ int main(int argc, char *argv[]) {
         } catch (itk::ExceptionObject &ex) {
           std::cout << ex << std::endl;
           return EXIT_FAILURE;
+        }
+      }
+
+      // we need a DICOM version of the label field as well, just a copy over the input
+      if (1) { // save the label field - without image information
+        gdcm::UIDGenerator suid;
+        std::string newSeriesUID = suid.Generate();
+        int seriesNumber = 0;
+        // frameOfReference as been defined below
+        // std::string frameOfReferenceUID = fuid.Generate();
+
+        // create the output directory for the DICOM data
+        itksys::SystemTools::MakeDirectory(output);
+        outputSeries = output + "/" + seriesIdentifier + "_separated";
+        itksys::SystemTools::MakeDirectory(outputSeries);
+        // fprintf(stdout, "save data to %s\n", output.c_str());
+        std::cout << "Writing output images to " << outputSeries << std::endl;
+        resultJSON["output_series_separated"] = std::string(outputSeries);
+        // now read in each input file in a loop, copy the result data over and write out as DICOM
+        for (int i = 0; i < fileNames.size(); i++) {
+          // std::cout << "use slice: " << fileNames[i] << " as template for output" << std::endl;
+
+          // this is 2D work
+          typedef signed short InputPixelType;
+          const unsigned int Dimension = 2;
+          typedef itk::Image<InputPixelType, Dimension> InputImageType;
+
+          typedef itk::ImageFileReader<InputImageType> ReaderType;
+          ReaderType::Pointer reader = ReaderType::New();
+          reader->SetFileName(fileNames[i]);
+
+          typedef itk::GDCMImageIO ImageIOType;
+          ImageIOType::Pointer gdcmImageIO = ImageIOType::New();
+          reader->SetImageIO(gdcmImageIO);
+
+          try {
+            reader->Update();
+          } catch (itk::ExceptionObject &e) {
+            std::cerr << "exception in file reader " << std::endl;
+            std::cerr << e.GetDescription() << std::endl;
+            std::cerr << e.GetLocation() << std::endl;
+            return EXIT_FAILURE;
+          }
+          // ReaderType::DictionaryRawPointer inputDict =
+          // (*(reader->GetMetaDataDictionaryArray()))[0];
+
+          InputImageType::Pointer inputImage = reader->GetOutput();
+          InputImageType::RegionType region;
+          region = inputImage->GetBufferedRegion();
+          InputImageType::SizeType size = region.GetSize();
+          // std::cout << "size is: " << size[0] << " " << size[1] << std::endl;
+
+          InputImageType::PixelContainer *container;
+          container = inputImage->GetPixelContainer();
+          container->SetContainerManageMemory(false);
+          unsigned int bla = sizeof(InputImageType::PixelType);
+          InputImageType::PixelType *buffer2 = container->GetBufferPointer();
+
+          ImageType::Pointer nImage = finalLabelField;
+          InputImageType::PixelContainer *container2;
+          container2 = nImage->GetPixelContainer();
+          InputImageType::PixelType *buffer3 = container2->GetBufferPointer();
+
+          memcpy(buffer2, &(buffer3[i * size[0] * size[1]]), size[0] * size[1] * bla);
+
+          typedef itk::MetaDataDictionary DictionaryType;
+          DictionaryType &dictionary = dicomIO->GetMetaDataDictionary();
+
+          std::string studyUID;
+          std::string sopClassUID;
+          std::string seriesNumber;
+          std::string frameOfReferenceUID;
+          itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
+          itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
+          itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
+
+          int newSeriesNumber = atoi(seriesNumber.c_str()) * 1000 + 2;
+
+          // without this we get different study instance uids for each image in the series
+          gdcmImageIO->KeepOriginalUIDOn();
+
+          gdcm::UIDGenerator sopuid;
+          std::string sopInstanceUID = sopuid.Generate();
+
+          // std::string entryId( "0008|103e" );
+          // std::string value( "Intensity Corrected" );
+          // itk::EncapsulateMetaData<std::string>( dictionary, entryId, value );
+
+          // DictionaryType *dict = new DictionaryType();
+
+          // Copy the dictionary from the first slice
+          // CopyDictionary (dictionary, *dict);
+
+          // Set the UID's for the study, series, SOP  and frame of reference
+
+          itk::EncapsulateMetaData<std::string>(dictionary, "0020|000d", studyUID);
+          itk::EncapsulateMetaData<std::string>(dictionary, "0020|000e", newSeriesUID);
+          itk::EncapsulateMetaData<std::string>(dictionary, "0020|0011", std::to_string(newSeriesNumber));
+          itk::EncapsulateMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID);
+
+          // these keys don't exist - results in error
+          // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0052", "0"); // Intercept
+          // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0053", "1"); // Slope
+
+          std::string oldSeriesDesc;
+          itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
+
+          std::ostringstream value;
+          value.str("");
+          value << oldSeriesDesc << " (lung labels)";
+          // This is a long string and there is a 64 character limit in the
+          // standard
+          unsigned lengthDesc = value.str().length();
+
+          std::string seriesDesc(value.str(), 0, lengthDesc > 64 ? 64 : lengthDesc);
+          itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc);
+
+          // set a lung window -600 ... 1600
+          itk::EncapsulateMetaData<std::string>(dictionary, "0028|1051", std::to_string(4));
+          itk::EncapsulateMetaData<std::string>(dictionary, "0028|1050", std::to_string(1.5));
+
+          // copy the values for this slice over
+          // CopyDictionary (*dict, dictionary);
+
+          // write out the result as a DICOM again
+          typedef itk::ImageFileWriter<InputImageType> Writer1Type;
+          Writer1Type::Pointer writer1 = Writer1Type::New();
+
+          writer1->SetInput(inputImage);
+          std::ostringstream o;
+          o << outputSeries << "/dicom" << i << ".dcm";
+          writer1->SetFileName(o.str());
+          writer1->SetImageIO(gdcmImageIO);
+          writer1->Update();
         }
       }
 
