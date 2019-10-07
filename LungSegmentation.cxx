@@ -313,7 +313,7 @@ int main(int argc, char *argv[]) {
       std::string outputSeries = output + "/" + seriesIdentifier;
       if (!force && itksys::SystemTools::FileIsDirectory(outputSeries.c_str())) {
         fprintf(stdout, "Skip this series %s, output directory exists already...\n", outputSeries.c_str());
-        exit(0);
+        exit(0); // this is no skip, that is giving up...
       }
 
       typedef std::vector<std::string> FileNamesContainer;
@@ -325,7 +325,7 @@ int main(int argc, char *argv[]) {
         std::cout << "skip processing, not enough images in this series..." << std::endl;
         continue;
       }
-      fprintf(stdout, "[sufficient number of images [%lu] in this series]\n", fileNames.size());
+      fprintf(stdout, "sufficient number of images (%lu) in this series\n", fileNames.size());
       resultJSON["series_identifier"] = seriesIdentifier;
       // for (int i = 0; i < fileNames.size(); i++) {
       //  resultJSON["file_names"].push_back(fileNames[i]);
@@ -1657,14 +1657,14 @@ int main(int argc, char *argv[]) {
           itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
           itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
           itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
+          itk::ExposeMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID); // read out
 
           int newSeriesNumber = atoi(seriesNumber.c_str()) * 1000 + 2;
 
           // without this we get different study instance uids for each image in the series
           gdcmImageIO->KeepOriginalUIDOn();
 
-          gdcm::UIDGenerator sopuid;
-          std::string sopInstanceUID = sopuid.Generate();
+          std::string sopInstanceUID = suid.Generate();
 
           // std::string entryId( "0008|103e" );
           // std::string value( "Intensity Corrected" );
@@ -1676,12 +1676,18 @@ int main(int argc, char *argv[]) {
           // CopyDictionary (dictionary, *dict);
 
           // Set the UID's for the study, series, SOP  and frame of reference
+          itk::MetaDataDictionary &dictionarySlice = reader->GetOutput()->GetMetaDataDictionary();
 
-          itk::EncapsulateMetaData<std::string>(dictionary, "0020|000d", studyUID);
-          itk::EncapsulateMetaData<std::string>(dictionary, "0020|000e", newSeriesUID);
-          itk::EncapsulateMetaData<std::string>(dictionary, "0020|0011", std::to_string(newSeriesNumber));
-          itk::EncapsulateMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID);
+          // fprintf(stdout, "Try to set this studyUID %s\n", studyUID.c_str());
+          // fprintf(stdout, "Try to set this newSeriesUID %s\n", newSeriesUID.c_str());
+          // fprintf(stdout, "Try to set this frame of reference UID: %s\n", frameOfReferenceUID.c_str());
+          // fprintf(stdout, "Try to set this SOP instance UID: %s\n", sopInstanceUID.c_str());
 
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|000d", studyUID);
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|000e", newSeriesUID);
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0011", std::to_string(newSeriesNumber));
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0052", frameOfReferenceUID); // apply
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|0018", sopInstanceUID);
           // these keys don't exist - results in error
           // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0052", "0"); // Intercept
           // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0053", "1"); // Slope
@@ -1697,11 +1703,13 @@ int main(int argc, char *argv[]) {
           unsigned lengthDesc = value.str().length();
 
           std::string seriesDesc(value.str(), 0, lengthDesc > 64 ? 64 : lengthDesc);
-          itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc);
+          // fprintf(stdout, "Try to set this series description: %s\n", seriesDesc.c_str());
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|103e", seriesDesc);
+          // itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc);
 
           // set a lung window -600 ... 1600
-          itk::EncapsulateMetaData<std::string>(dictionary, "0028|1051", std::to_string(4));
-          itk::EncapsulateMetaData<std::string>(dictionary, "0028|1050", std::to_string(1.5));
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0028|1051", std::to_string(4));
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0028|1050", std::to_string(1.5));
 
           // copy the values for this slice over
           // CopyDictionary (*dict, dictionary);
@@ -1914,8 +1922,8 @@ int main(int argc, char *argv[]) {
             std::cerr << e.GetLocation() << std::endl;
             return EXIT_FAILURE;
           }
-          // ReaderType::DictionaryRawPointer inputDict =
-          // (*(reader->GetMetaDataDictionaryArray()))[0];
+          // ReaderType::DictionaryRawPointer inputDict = (*(reader->GetMetaDataDictionaryArray()))[0];
+          itk::MetaDataDictionary dictionarySlice = reader->GetOutput()->GetMetaDataDictionary();
 
           InputImageType::Pointer inputImage = reader->GetOutput();
           InputImageType::RegionType region;
@@ -1953,10 +1961,9 @@ int main(int argc, char *argv[]) {
           CImageType::PixelContainer *container22 = fusedNImage->GetPixelContainer();
           CImageType::PixelType *buffer22 = container22->GetBufferPointer();
 
-          // go into slice by applying offset
-          uint32_t len = inRegion.GetSize()[0] * inRegion.GetSize()[1] * 3 * sizeof(unsigned char);
-          pixeldata.SetByteValue((char *)(((unsigned char *)buffer22) + i * len), len);
-          image.SetDataElement(pixeldata);
+          // for this image create a new image instance UID
+          gdcm::UIDGenerator sopuid;
+          std::string sopInstanceUID = sopuid.Generate();
 
           // now copy all the DICOM tags over
           using DictionaryType = itk::MetaDataDictionary;
@@ -1965,6 +1972,42 @@ int main(int argc, char *argv[]) {
           auto itr = dictionaryIn.Begin();
           auto end = dictionaryIn.End();
           //            itk::MetaDataDictionary outMetaData;
+
+          std::string imagePositionPatient; // we might be able to get them this way, but can we set them?
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0020|0032", imagePositionPatient);
+          // perhaps we have to use the parsed values to write them again further down?
+          double origin3D[3];
+          sscanf(imagePositionPatient.c_str(), "%lf\\%lf\\%lf", &(origin3D[0]), &(origin3D[1]), &(origin3D[2]));
+
+          std::string imageOrientation;
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0020|0037", imageOrientation);
+          double imageOrientationField[6];
+          sscanf(imageOrientation.c_str(), "%lf\\%lf\\%lf\\%lf\\%lf\\%lf", &(imageOrientationField[0]), &(imageOrientationField[1]),
+                 &(imageOrientationField[2]), &(imageOrientationField[3]), &(imageOrientationField[4]), &(imageOrientationField[5]));
+
+          std::string sliceThicknessString;
+          double sliceThickness = 0.0;
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0018|0050", sliceThicknessString);
+          sscanf(sliceThicknessString.c_str(), "%lf", &sliceThickness);
+
+          std::string imageInstanceString;
+          int imageInstance = 0;
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0020|0013", imageInstanceString);
+          sscanf(imageInstanceString.c_str(), "%d", &imageInstance);
+          // fprintf(stdout, "FOUND INSTANCE: %d\n", imageInstance); // start counting with 0 when we use this value to pick the slice
+
+          std::string sliceLocationString;
+          float sliceLocation = 0.0f;
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0020|1041", sliceLocationString);
+          sscanf(sliceLocationString.c_str(), "%f", &sliceLocation);
+
+          // go into slice by applying offset
+          // here the problem is that slices can be in a different order from the number in sliceNames
+          // we should therefore use an i that corresponds to the image instance number - not the slice name
+          // sort order
+          uint32_t len = inRegion.GetSize()[0] * inRegion.GetSize()[1] * 3 * sizeof(unsigned char);
+          pixeldata.SetByteValue((char *)(((unsigned char *)buffer22) + i * len), len);
+          image.SetDataElement(pixeldata);
 
           // create an image (see
           // http://gdcm.sourceforge.net/html/GenFakeImage_8cxx-example.html#_a1)
@@ -2054,7 +2097,7 @@ int main(int argc, char *argv[]) {
           // two source image (we need to generate fake UID for that).
           // move this inside the loop above to copy values over
           gdcm::Attribute<0x0008, 0x2111> at1; // Derivative Description
-          at1.SetValue("Segmented Lung - Stage 1");
+          at1.SetValue("Segmented Lung - Fused Segmentation");
           ds.Replace(at1.GetAsDataElement());
 
           gdcm::Attribute<0x0008, 0x0060> at2; // Derivative Description
@@ -2073,11 +2116,44 @@ int main(int argc, char *argv[]) {
           at5.SetValue(seriesNumber * 1000);
           ds.Replace(at5.GetAsDataElement());
 
+          // use a unique SOPInstanceUID
+          gdcm::Attribute<0x0008, 0x0018> at6;
+          at6.SetValue(sopInstanceUID);
+          ds.Replace(at6.GetAsDataElement());
+
+          // image position patient from input
+          gdcm::Attribute<0x0020, 0x0032> at7;
+          at7.SetValue(origin3D[0], 0);
+          at7.SetValue(origin3D[1], 1);
+          at7.SetValue(origin3D[2], 2);
+          ds.Replace(at7.GetAsDataElement());
+
+          gdcm::Attribute<0x0018, 0x0050> at8;
+          at8.SetValue(sliceThickness);
+          ds.Replace(at8.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x0037> at9;
+          at9.SetValue(imageOrientationField[0], 0);
+          at9.SetValue(imageOrientationField[1], 1);
+          at9.SetValue(imageOrientationField[2], 2);
+          at9.SetValue(imageOrientationField[3], 3);
+          at9.SetValue(imageOrientationField[4], 4);
+          at9.SetValue(imageOrientationField[5], 5);
+          ds.Replace(at9.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x0013> at10;
+          at10.SetValue(imageInstance);
+          ds.Replace(at10.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x1041> at11;
+          at11.SetValue(sliceLocation);
+          ds.Replace(at11.GetAsDataElement());
+
           gdcm::ImageWriter writer;
           writer.SetImage(image);
           writer.SetFile(fd.GetFile());
           char pp[2048];
-          sprintf(pp, "%s/dicom%d.dcm", outputSeries.c_str(), i);
+          sprintf(pp, "%s/dicom%05d.dcm", outputSeries.c_str(), i);
           std::string fname(pp);
           // std::ostringstream o;
           // o << outputSeries << "/dicom" << i << ".dcm";
