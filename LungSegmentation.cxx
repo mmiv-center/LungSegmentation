@@ -2604,11 +2604,13 @@ int main(int argc, char *argv[]) {
         memcpy(buffer2, &(buffer3[i * size[0] * size[1]]), size[0] * size[1] * bla);
 
         typedef itk::MetaDataDictionary DictionaryType;
-        DictionaryType &dictionary = inputImage->GetMetaDataDictionary();
+        DictionaryType &dictionary = reader->GetOutput()->GetMetaDataDictionary();
 
         std::string studyUID;
         std::string sopClassUID;
         std::string seriesNumber;
+        std::string oldSeriesDesc;
+        itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
         itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
         itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
         itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
@@ -2635,23 +2637,23 @@ int main(int argc, char *argv[]) {
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|000e", newSeriesUID);
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|0011", std::to_string(newSeriesNumber));
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID);
+        itk::EncapsulateMetaData<std::string>(dictionary, "0008|0018",
+                                              sopInstanceUID); // make the images unique so not to confuse them with the existing images
 
         // these keys don't exist - results in error
         // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0052", "0"); // Intercept
         // itk::EncapsulateMetaData<std::string>(dictionary,"0020|0053", "1"); // Slope
 
-        std::string oldSeriesDesc;
-        itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
-
         std::ostringstream value;
+        std::string extension = " (lung segmentation)";
         value.str("");
-        value << oldSeriesDesc << " (lung segmentation)";
+        value << oldSeriesDesc;
         // This is a long string and there is a 64 character limit in the
         // standard
         unsigned lengthDesc = value.str().length();
 
-        std::string seriesDesc(value.str(), 0, lengthDesc > 64 ? 64 : lengthDesc);
-        itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc);
+        std::string seriesDesc(value.str(), 0, lengthDesc + extension.length() > 64 ? 64 - extension.length() : lengthDesc + extension.length());
+        itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc + extension);
 
         // set a lung window -600 ... 1600
         itk::EncapsulateMetaData<std::string>(dictionary, "0028|1051", std::to_string(1400));
