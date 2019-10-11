@@ -1481,28 +1481,44 @@ int main(int argc, char *argv[]) {
 
           DilateFilterType3D::Pointer dilate01 = DilateFilterType3D::New(); // grows inside the tissue
           DilateFilterType3D::Pointer dilate02 = DilateFilterType3D::New(); // grows inside the tissue
+          DilateFilterType3D::Pointer dilate03 = DilateFilterType3D::New(); // grows inside the tissue
+          DilateFilterType3D::Pointer dilate04 = DilateFilterType3D::New(); // grows inside the tissue
           ErodeFilterType3D::Pointer erode01 = ErodeFilterType3D::New();
           ErodeFilterType3D::Pointer erode02 = ErodeFilterType3D::New();
+          ErodeFilterType3D::Pointer erode03 = ErodeFilterType3D::New();
+          ErodeFilterType3D::Pointer erode04 = ErodeFilterType3D::New();
           StructuringElementType structuringElement2;
           structuringElement2.SetRadius(1); // 3x3 structuring element
           structuringElement2.CreateStructuringElement();
           dilate01->SetKernel(structuringElement2);
           dilate02->SetKernel(structuringElement2);
+          dilate03->SetKernel(structuringElement2);
+          dilate04->SetKernel(structuringElement2);
           erode01->SetKernel(structuringElement2);
           erode02->SetKernel(structuringElement2);
+          erode03->SetKernel(structuringElement2);
+          erode04->SetKernel(structuringElement2);
           dilate01->SetDilateValue(1);
           dilate02->SetDilateValue(1);
+          dilate03->SetDilateValue(1);
+          dilate04->SetDilateValue(1);
           erode01->SetErodeValue(1);
           erode02->SetErodeValue(1);
+          erode03->SetErodeValue(1);
+          erode04->SetErodeValue(1);
           dilate01->SetInput(tlabel);
           dilate02->SetInput(dilate01->GetOutput());
-          erode01->SetInput(dilate02->GetOutput());
+          dilate03->SetInput(dilate02->GetOutput());
+          dilate04->SetInput(dilate03->GetOutput());
+          erode01->SetInput(dilate04->GetOutput());
           erode02->SetInput(erode01->GetOutput());
-          erode02->Update();
+          erode03->SetInput(erode02->GetOutput());
+          erode04->SetInput(erode03->GetOutput());
+          erode04->Update();
 
           // ok, now copy this back to the image, overwrite the previous value labelIds[label]
           itk::ImageRegionIterator<ImageType> labelIter03(finalLabelField, reg);
-          itk::ImageRegionIterator<ImageType> labelIter04(erode02->GetOutput(), reg);
+          itk::ImageRegionIterator<ImageType> labelIter04(erode04->GetOutput(), reg);
           while (!labelIter03.IsAtEnd() && !labelIter04.IsAtEnd()) {
             if (labelIter04.Get() == 1) {
               labelIter03.Set(labelIds[label]);
@@ -1645,7 +1661,15 @@ int main(int argc, char *argv[]) {
           container2 = nImage->GetPixelContainer();
           InputImageType::PixelType *buffer3 = container2->GetBufferPointer();
 
+          // Here we copy all values over, that is 0, 1, 2, 3 but also additional labels
+          // that have been selected before (air in intestines for example).
           memcpy(buffer2, &(buffer3[i * size[0] * size[1]]), size[0] * size[1] * bla);
+          // We can clean the data (remove all other label).
+          for (int k = 0; k < size[0] * size[1]; k++) {
+            if (buffer2[k] > 3) {
+              buffer[k] = 0; // set to background
+            }
+          }
 
           typedef itk::MetaDataDictionary DictionaryType;
           DictionaryType &dictionary = dicomIO->GetMetaDataDictionary();
