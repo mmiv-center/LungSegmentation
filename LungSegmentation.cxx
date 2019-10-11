@@ -1947,7 +1947,7 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
           }
           // ReaderType::DictionaryRawPointer inputDict = (*(reader->GetMetaDataDictionaryArray()))[0];
-          itk::MetaDataDictionary dictionarySlice = reader->GetOutput()->GetMetaDataDictionary();
+          itk::MetaDataDictionary &dictionarySlice = reader->GetOutput()->GetMetaDataDictionary();
 
           InputImageType::Pointer inputImage = reader->GetOutput();
           InputImageType::RegionType region;
