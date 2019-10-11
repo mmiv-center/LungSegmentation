@@ -2604,7 +2604,7 @@ int main(int argc, char *argv[]) {
         memcpy(buffer2, &(buffer3[i * size[0] * size[1]]), size[0] * size[1] * bla);
 
         typedef itk::MetaDataDictionary DictionaryType;
-        DictionaryType &dictionary = dicomIO->GetMetaDataDictionary();
+        DictionaryType &dictionary = inputImage->GetMetaDataDictionary();
 
         std::string studyUID;
         std::string sopClassUID;
