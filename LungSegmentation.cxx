@@ -1667,7 +1667,7 @@ int main(int argc, char *argv[]) {
           // We can clean the data (remove all other label).
           for (int k = 0; k < size[0] * size[1]; k++) {
             if (buffer2[k] > 3) {
-              buffer[k] = 0; // set to background
+              buffer2[k] = 0; // set to background
             }
           }
 
