@@ -12,9 +12,21 @@ else()
   set(ITK_DIR /opt/InsightToolkit-5.0.1/bin)
 endif()
 
+IF(UNIX AND NOT APPLE)
+  set(LINUX TRUE)
+  message(STATUS ">>> Linux")
+ELSE()
+  message(STATUS ">>> MacOS")
+ENDIF()
+
 
 #SET(CMAKE_CXX_FLAGS "-std=c++0x")
-SET(CMAKE_CXX_FLAGS "-std=c++11")
+IF(LINUX)
+   SET(CMAKE_CXX_FLAGS "-std=c++11")
+ELSE()
+   # find the correct path for isysroot with `xcrun --show-sdk-path`
+   SET(CMAKE_CXX_FLAGS "-std=c++11 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -I/usr/local/include")
+ENDIF()
 
 project(LungSegmentation)
 
@@ -42,6 +54,3 @@ target_link_libraries(LungSegmentation  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
 
 add_executable(MaskRegistration MaskRegistration.cxx )
 target_link_libraries(MaskRegistration  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
-
-#add_executable(Closing Closing.cxx )
-#target_link_libraries(Closing  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
