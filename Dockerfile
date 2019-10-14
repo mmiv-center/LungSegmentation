@@ -12,6 +12,7 @@ RUN cd /tmp/ \
 
 RUN mkdir /LungSegmentation && cd /LungSegmentation/ \
     && git clone https://github.com/mmiv-center/LungSegmentation.git . \
+    && echo "Change this string to make this rebuild on docker build" \
     && cmake . && make
 
 ENTRYPOINT [ "/LungSegmentation/LungSegmentation" ]
