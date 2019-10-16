@@ -1677,13 +1677,19 @@ int main(int argc, char *argv[]) {
           std::string studyUID;
           std::string sopClassUID;
           std::string seriesNumber;
+          std::string acquisitionNumber;
+          std::string instanceNumber;
           std::string frameOfReferenceUID;
           itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
           itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
           itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
+          itk::ExposeMetaData<std::string>(dictionary, "0020|0012", acquisitionNumber);
+          itk::ExposeMetaData<std::string>(dictionary, "0020|0013", instanceNumber);
           itk::ExposeMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID); // read out
 
-          int newSeriesNumber = atoi(seriesNumber.c_str()) * 1000 + 2;
+          int newSeriesNumber = 1000 + atoi(seriesNumber.c_str()) + 2;
+          int newAcquisitionNumber = 1000 + atoi(acquisitionNumber.c_str()) + 2;
+          int newInstanceNumber = atoi(instanceNumber.c_str());
 
           // without this we get different study instance uids for each image in the series
           gdcmImageIO->KeepOriginalUIDOn();
@@ -1710,6 +1716,8 @@ int main(int argc, char *argv[]) {
           itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|000d", studyUID);
           itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|000e", newSeriesUID);
           itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0011", std::to_string(newSeriesNumber));
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0012", std::to_string(newAcquisitionNumber));
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0013", std::to_string(newInstanceNumber));
           itk::EncapsulateMetaData<std::string>(dictionarySlice, "0020|0052", frameOfReferenceUID); // apply
           itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|0018", sopInstanceUID);
           // these keys don't exist - results in error
@@ -1720,15 +1728,20 @@ int main(int argc, char *argv[]) {
           itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
 
           std::ostringstream value;
+          std::string extension = " (lung labels)";
           value.str("");
-          value << oldSeriesDesc << " (lung labels)";
+          value << oldSeriesDesc;
           // This is a long string and there is a 64 character limit in the
           // standard
           unsigned lengthDesc = value.str().length();
 
-          std::string seriesDesc(value.str(), 0, lengthDesc > 64 ? 64 : lengthDesc);
+          // std::string seriesDesc(value.str(), 0, lengthDesc > 64 ? 64 : lengthDesc);
           // fprintf(stdout, "Try to set this series description: %s\n", seriesDesc.c_str());
-          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|103e", seriesDesc);
+          // itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|103e", seriesDesc);
+
+          std::string seriesDesc(value.str(), 0, lengthDesc + extension.length() > 64 ? 64 - extension.length() : lengthDesc + extension.length());
+          itk::EncapsulateMetaData<std::string>(dictionarySlice, "0008|103e", seriesDesc + extension);
+
           // itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc);
 
           // set a lung window -600 ... 1600
@@ -2002,12 +2015,15 @@ int main(int argc, char *argv[]) {
           // perhaps we have to use the parsed values to write them again further down?
           double origin3D[3];
           sscanf(imagePositionPatient.c_str(), "%lf\\%lf\\%lf", &(origin3D[0]), &(origin3D[1]), &(origin3D[2]));
+          // fprintf(stdout, "image position patient field: %lf, %lf, %lf\n", origin3D[0], origin3D[1], origin3D[2]);
 
           std::string imageOrientation;
           itk::ExposeMetaData<std::string>(dictionarySlice, "0020|0037", imageOrientation);
           double imageOrientationField[6];
           sscanf(imageOrientation.c_str(), "%lf\\%lf\\%lf\\%lf\\%lf\\%lf", &(imageOrientationField[0]), &(imageOrientationField[1]),
                  &(imageOrientationField[2]), &(imageOrientationField[3]), &(imageOrientationField[4]), &(imageOrientationField[5]));
+          // fprintf(stdout, "image orientation field: %lf, %lf, %lf, %lf, %lf, %lf\n", imageOrientationField[0], imageOrientationField[1],
+          //        imageOrientationField[2], imageOrientationField[3], imageOrientationField[4], imageOrientationField[5]);
 
           std::string sliceThicknessString;
           double sliceThickness = 0.0;
@@ -2024,6 +2040,11 @@ int main(int argc, char *argv[]) {
           float sliceLocation = 0.0f;
           itk::ExposeMetaData<std::string>(dictionarySlice, "0020|1041", sliceLocationString);
           sscanf(sliceLocationString.c_str(), "%f", &sliceLocation);
+
+          std::string imageAcquisitionString;
+          int acquisitionNumber = 0;
+          itk::ExposeMetaData<std::string>(dictionarySlice, "0020|0012", imageAcquisitionString);
+          sscanf(imageAcquisitionString.c_str(), "%d", &acquisitionNumber);
 
           // go into slice by applying offset
           // here the problem is that slices can be in a different order from the number in sliceNames
@@ -2133,11 +2154,21 @@ int main(int argc, char *argv[]) {
           ds.Replace(at3.GetAsDataElement());
 
           gdcm::Attribute<0x0008, 0x103E> at4;
-          at4.SetValue(seriesDescription + " (fused segmentation)");
+          std::string extension = " (fused segmentation)";
+          std::ostringstream value;
+          value.str("");
+          value << seriesDescription;
+          // This is a long string and there is a 64 character limit in the
+          // standard
+          unsigned lengthDesc = value.str().length();
+          std::string seriesDesc(value.str(), 0, lengthDesc + extension.length() > 64 ? 64 - extension.length() : lengthDesc + extension.length());
+          // itk::EncapsulateMetaData<std::string>(dictionary, "0008|103e", seriesDesc + extension);
+          at4.SetValue(seriesDesc + extension);
           ds.Replace(at4.GetAsDataElement());
 
+          // seriesInstance
           gdcm::Attribute<0x0020, 0x0011> at5;
-          at5.SetValue(seriesNumber * 1000);
+          at5.SetValue(1000 + seriesNumber + 3);
           ds.Replace(at5.GetAsDataElement());
 
           // use a unique SOPInstanceUID
@@ -2146,11 +2177,20 @@ int main(int argc, char *argv[]) {
           ds.Replace(at6.GetAsDataElement());
 
           // image position patient from input
+          // These values are actually not getting written to the files (RGB has no origin, values are 0\0\0, but see set origin further down)
           gdcm::Attribute<0x0020, 0x0032> at7;
           at7.SetValue(origin3D[0], 0);
           at7.SetValue(origin3D[1], 1);
           at7.SetValue(origin3D[2], 2);
           ds.Replace(at7.GetAsDataElement());
+          std::ostringstream value2;
+          value2.str("");
+          at7.Print(value2);
+          //fprintf(stdout, "origin is now supposed to be: %lf\\%lf\\%lf %s\n", origin3D[0], origin3D[1], origin3D[2], value2.str().c_str());
+          // For RGB we can set this to make sure they show up at the right location in Horos/OsiriX
+          image.SetOrigin(0, origin3D[0]);
+          image.SetOrigin(1, origin3D[1]);
+          image.SetOrigin(2, origin3D[2]);
 
           gdcm::Attribute<0x0018, 0x0050> at8;
           at8.SetValue(sliceThickness);
@@ -2165,13 +2205,25 @@ int main(int argc, char *argv[]) {
           at9.SetValue(imageOrientationField[5], 5);
           ds.Replace(at9.GetAsDataElement());
 
-          gdcm::Attribute<0x0020, 0x0013> at10;
-          at10.SetValue(imageInstance);
-          ds.Replace(at10.GetAsDataElement());
+          // gdcm::Attribute<0x0020, 0x0013> at10;
+          // at10.SetValue(imageInstance);
+          // ds.Replace(at10.GetAsDataElement());
 
           gdcm::Attribute<0x0020, 0x1041> at11;
           at11.SetValue(sliceLocation);
           ds.Replace(at11.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x0012> at12;
+          at12.SetValue(1000 + acquisitionNumber + 3);
+          ds.Replace(at12.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x0013> at13;
+          at13.SetValue(imageInstance); // count starts at 1 and increments for all slices
+          ds.Replace(at13.GetAsDataElement());
+
+          gdcm::Attribute<0x0020, 0x0052> at14;
+          at14.SetValue(frameOfReferenceUID.c_str());
+          ds.Replace(at14.GetAsDataElement());
 
           gdcm::ImageWriter writer;
           writer.SetImage(image);
@@ -2610,12 +2662,18 @@ int main(int argc, char *argv[]) {
         std::string sopClassUID;
         std::string seriesNumber;
         std::string oldSeriesDesc;
+        std::string acquisitionNumber;
+        std::string instanceNumber;
         itk::ExposeMetaData<std::string>(dictionary, "0008|103e", oldSeriesDesc);
         itk::ExposeMetaData<std::string>(dictionary, "0020|000d", studyUID);
         itk::ExposeMetaData<std::string>(dictionary, "0008|0016", sopClassUID);
         itk::ExposeMetaData<std::string>(dictionary, "0020|0011", seriesNumber);
+        itk::ExposeMetaData<std::string>(dictionary, "0020|0012", acquisitionNumber);
+        itk::ExposeMetaData<std::string>(dictionary, "0020|0013", instanceNumber);
 
-        int newSeriesNumber = atoi(seriesNumber.c_str()) * 1000 + 1;
+        int newSeriesNumber = 1000 + atoi(seriesNumber.c_str()) + 1;
+        int newAcquisitionNumber = 1000 + atoi(acquisitionNumber.c_str()) + 1;
+        int newInstanceNumber = 1000 + atoi(instanceNumber.c_str()) + 1;
 
         gdcmImageIO->KeepOriginalUIDOn();
 
@@ -2636,6 +2694,8 @@ int main(int argc, char *argv[]) {
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|000d", studyUID);
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|000e", newSeriesUID);
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|0011", std::to_string(newSeriesNumber));
+        itk::EncapsulateMetaData<std::string>(dictionary, "0020|0012", std::to_string(newAcquisitionNumber));
+        itk::EncapsulateMetaData<std::string>(dictionary, "0020|0013", std::to_string(newInstanceNumber));
         itk::EncapsulateMetaData<std::string>(dictionary, "0020|0052", frameOfReferenceUID);
         itk::EncapsulateMetaData<std::string>(dictionary, "0008|0018",
                                               sopInstanceUID); // make the images unique so not to confuse them with the existing images
