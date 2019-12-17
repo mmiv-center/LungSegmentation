@@ -665,7 +665,7 @@ int main(int argc, char *argv[]) {
                                                        // of number of pixel
           useNObjects++;
       }
-      if (useNObjects < 0) {
+      if (useNObjects < 1) {
         fprintf(stdout, "useNObjects is: %d. Set manually to 1.\n", useNObjects);
         useNObjects = 1;
       }
@@ -880,12 +880,62 @@ int main(int argc, char *argv[]) {
           sliceSeedStart = sliceNumber;
           fprintf(stdout, "found %lu objects in slice %d of %d\n", labelMapTmp->GetNumberOfLabelObjects(), sliceNumber + 1, lastSlice);
           // seed point would be in the object that is closest to the center of mass in the image
+          // The above assumption is sometimes wrong. One of the lungs might be closer to the center of the image.
+          // Instead we could assume that the lungs are oriented in the same way in all images. That allows us to
+          // look at a single coordinate and to select the object that is in the middle of the other two objects.
+
           // we could go to the last slice that has 3 objects as well...
           // what if we have only one lung? We should detect the diameter of the airways instead..
           // something like at least two objects
 
+          double spacingx = inputImage->GetSpacing()[0];
+          double spacingy = inputImage->GetSpacing()[1];
+          double spacingz = inputImage->GetSpacing()[2];
+          double originx = inputImage->GetOrigin()[0];
+          double originy = inputImage->GetOrigin()[1];
+          double originz = inputImage->GetOrigin()[2];
+
+          // what is in the middle in the x-direction? (assumes we have three objects!)
+          double x1 = labelMapTmp->GetNthLabelObject(0)->GetCentroid()[0];
+          double x2 = labelMapTmp->GetNthLabelObject(1)->GetCentroid()[0];
+          double x3 = labelMapTmp->GetNthLabelObject(2)->GetCentroid()[0];
+          if ((x1 > x2 && x1 < x3) || (x1 > x3 && x1 < x2)) {
+            // point 0 is the one we are looking for
+            minDist = 0;
+            minRegion = 0;
+            double x = labelMapTmp->GetNthLabelObject(0)->GetCentroid()[0];
+            double y = labelMapTmp->GetNthLabelObject(0)->GetCentroid()[1];
+            int seedx = roundf((x - originx) / spacingx);
+            int seedy = roundf((y - originy) / spacingy);
+            minSeedx = seedx;
+            minSeedy = seedy;
+            minNumObjects = labelMapTmp->GetNumberOfLabelObjects();
+          } else if ((x2 > x1 && x2 < x3) || (x2 > x3 && x2 < x1)) {
+            // point 1 is the one we are looking for
+            minDist = 0;
+            minRegion = 0;
+            double x = labelMapTmp->GetNthLabelObject(1)->GetCentroid()[0];
+            double y = labelMapTmp->GetNthLabelObject(1)->GetCentroid()[1];
+            int seedx = roundf((x - originx) / spacingx);
+            int seedy = roundf((y - originy) / spacingy);
+            minSeedx = seedx;
+            minSeedy = seedy;
+            minNumObjects = labelMapTmp->GetNumberOfLabelObjects();
+          } else {
+            // point 3 is the one we are looking for
+            minDist = 0;
+            minRegion = 0;
+            double x = labelMapTmp->GetNthLabelObject(2)->GetCentroid()[0];
+            double y = labelMapTmp->GetNthLabelObject(2)->GetCentroid()[1];
+            int seedx = roundf((x - originx) / spacingx);
+            int seedy = roundf((y - originy) / spacingy);
+            minSeedx = seedx;
+            minSeedy = seedy;
+            minNumObjects = labelMapTmp->GetNumberOfLabelObjects();
+          }
+
           // which one is closest to the center (center of mass)
-          for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); n++) {
+          /*for (unsigned int n = 0; n < labelMapTmp->GetNumberOfLabelObjects(); n++) {
             ShapeLabelObjectType *labelObject = labelMapTmp->GetNthLabelObject(n);
             double x = labelObject->GetCentroid()[0];
             double y = labelObject->GetCentroid()[1];
@@ -922,7 +972,7 @@ int main(int argc, char *argv[]) {
             fprintf(stdout, "object %d is %f far away from center, centroid is at: %d %d\n", n, dist, seedx, seedy);
 
             // inputRegion
-          }
+          } */
           break;
         }
       }
@@ -2186,7 +2236,7 @@ int main(int argc, char *argv[]) {
           std::ostringstream value2;
           value2.str("");
           at7.Print(value2);
-          //fprintf(stdout, "origin is now supposed to be: %lf\\%lf\\%lf %s\n", origin3D[0], origin3D[1], origin3D[2], value2.str().c_str());
+          // fprintf(stdout, "origin is now supposed to be: %lf\\%lf\\%lf %s\n", origin3D[0], origin3D[1], origin3D[2], value2.str().c_str());
           // For RGB we can set this to make sure they show up at the right location in Horos/OsiriX
           image.SetOrigin(0, origin3D[0]);
           image.SetOrigin(1, origin3D[1]);
