@@ -3,3 +3,5 @@ jobs:
   build:
     docker:
       - image: mmiv-center/LungSegmentation:latest
+    steps:
+     - checkout
