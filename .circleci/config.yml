@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: ubuntu:18.04
+      - image: docker:17.05.0-ce-git
     steps:
      - checkout
      - run: docker build -t lungsegmentation -f Dockerfile .
