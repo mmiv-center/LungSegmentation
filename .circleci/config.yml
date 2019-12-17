@@ -2,6 +2,8 @@ version: 2
 jobs:
   build:
     docker:
-      - image: mmiv-center/LungSegmentation:latest
+      - image: mmiv-center/lungsegmentation:latest
     steps:
      - checkout
+     - run: docker build -t lungsegmentation -f Dockerfile .
+     
