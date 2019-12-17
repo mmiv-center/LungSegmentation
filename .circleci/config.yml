@@ -7,4 +7,5 @@ jobs:
      - checkout
      - setup_remote_docker
      - run: docker build -t lungsegmentation -f Dockerfile .
-     
+     - deploy:
+       name: Push application Docker image, to be done - no repository yet
