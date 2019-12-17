@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: mmiv-center/lungsegmentation:latest
+      - image: ubuntu:18.04
     steps:
      - checkout
      - run: docker build -t lungsegmentation -f Dockerfile .
