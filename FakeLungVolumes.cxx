@@ -107,7 +107,10 @@ int main(int argc, char *argv[]) {
 
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
-  command.SetDescription("FakeLungVolumes simulating CT contrast. Exports volume files like nrrd or nifti.");
+  command.SetDescription("FakeLungVolumes simulating CT contrast volumes. Exports volume files like nrrd or nifti based on the "
+                         "provided file extension for the output image. The algorithm calculates the discrete intersection of two iso-surfaces "
+                         "from band-pass filtered white noise volumes. Based on the amount of band-pass filtering and the threshold for the "
+                         "intersection detection blood-vessel like pattern can be generated.");
   command.AddField("outfile", "Exported file name.", MetaCommand::STRING, true);
 
   command.SetOption("Resolution", "r", false, "Specify the resolution of the volume to be generated (in pixel as in 64x64x64).");
@@ -116,11 +119,14 @@ int main(int argc, char *argv[]) {
   command.SetOption("SmoothingKernelSize", "k", false, "Specify the kernel size for the Gaussian in pixel (7).");
   command.AddOptionField("SmoothingKernelSize", "kernelSize", MetaCommand::INT, false);
 
-  command.SetOption("SmoothingIterations", "i", false, "Specify the number of times the Gaussian kernels are applied (3).");
+  command.SetOption("SmoothingIterations", "i", false, "Specify the number of times the Gaussian kernels are applied (2).");
   command.AddOptionField("SmoothingIterations", "iterations", MetaCommand::INT, false);
 
-  command.SetOption("Threshold", "t", false, "Specify the threshold for the zero-crossing (0.0005).");
+  command.SetOption("Threshold", "t", false, "Specify the threshold for zero-crossing (0.0001).");
   command.AddOptionField("Threshold", "threshold", MetaCommand::FLOAT, false);
+
+  command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
+  command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
   command.SetOption("Force", "f", false, "Ignore existing files and force overwrite.");
 
@@ -130,14 +136,19 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  int iterations = 3;
+  float finalSmooth = 0;
+  if (command.GetOptionWasSet("finalSmooth")) {
+    finalSmooth = command.GetValueAsFloat("finalSmooth", "finalsmooth");
+    fprintf(stdout, "final smoothing kernel is: %f\n", finalSmooth);
+  }
+  
+  int iterations = 2;
   if (command.GetOptionWasSet("Iterations")) {
     iterations = command.GetValueAsInt("Iterations", "iterations");
     fprintf(stdout, "iterations is now: %d\n", iterations);
   }
 
-
-  float threshold = 0.0005;
+  float threshold = 0.0001;
   if (command.GetOptionWasSet("Threshold")) {
     threshold = command.GetValueAsFloat("Threshold", "threshold");
     fprintf(stdout, "threshold is now: %f\n", threshold);
@@ -162,19 +173,19 @@ int main(int argc, char *argv[]) {
     resolution = command.GetValueAsString("Resolution", "resolution");
   }
 
-
   // store information in the result json file
   resultJSON["command_line"] = json::array();
   for (int i = 0; i < argc; i++) {
     resultJSON["command_line"].push_back(std::string(argv[i]));
   }
 
-  //  typedef signed short PixelType;
+  typedef unsigned short OutputPixelType;
   typedef float FloatPixelType;
   const unsigned int Dimension = 3;
 
   //  typedef itk::Image<PixelType, Dimension> ImageType;
   typedef itk::Image<FloatPixelType, Dimension> ImageType;
+  typedef itk::Image<OutputPixelType, Dimension> OutputImageType;
 
   ImageType::Pointer imageA = ImageType::New();
   ImageType::Pointer imageB = ImageType::New();
@@ -238,19 +249,36 @@ int main(int argc, char *argv[]) {
   IteratorType itB( tmpB, tmpB->GetLargestPossibleRegion() ); 
   for ( IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
     if (fabs(itA.Get()) < threshold && fabs(itB.Get()) < threshold)
-      IteratorE.Set( 1.0 );
+      IteratorE.Set( 4095.0 );
     else 
       IteratorE.Set( 0.0 );
   }
 
   // we should blur the result?
-  FilterType::Pointer s = FilterType::New();
-  s->SetSigma(1);
-  s->SetInput(erg);
-  s->Update();
+  ImageType::Pointer result = ImageType::New();
+  if ( finalSmooth == 0 ) { // does this work for a float?
+    result = erg;
+  } else {
+    FilterType::Pointer s = FilterType::New();
+    s->SetSigma(finalSmooth);
+    s->SetInput(erg);
+    s->Update();
+    result = s->GetOutput();
+    // cleanup smoothing mess
+    IteratorType iter( result, result->GetLargestPossibleRegion() ); 
+    for ( iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
+      if (iter.Get() > 4068 || iter.Get() < 0)
+        iter.Set(0);
+    }
+  }
+
+  // cast to the output pixel type
+  using OutputFilterType = itk::CastImageFilter<ImageType, OutputImageType>;
+  OutputFilterType::Pointer filter = OutputFilterType::New();
+  filter->SetInput(result);
 
   if (1) { // don't save this because its not with lungs separated
-    typedef itk::ImageFileWriter<ImageType> WriterType;
+    typedef itk::ImageFileWriter<OutputImageType> WriterType;
     WriterType::Pointer writer = WriterType::New();
 
     std::string volFileName = output;
@@ -258,7 +286,7 @@ int main(int argc, char *argv[]) {
     create_directories(p.parent_path());
 
     writer->SetFileName(volFileName);
-    writer->SetInput(s->GetOutput()); // not the right field
+    writer->SetInput(filter->GetOutput()); // not the right field
 
     std::cout << "Writing the Fake Lung Volume " << std::endl << std::endl;
     std::cout << volFileName << std::endl << std::endl;
