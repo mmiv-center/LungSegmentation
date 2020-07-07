@@ -75,6 +75,6 @@ To generate a higher resolution volume
 ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 128x128x128 /tmp/output.nrrd
 ```
 
-[Fake vessel volume generated with ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 512x512x512 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeVesselVolume.gif)
+![Fake vessel volume generated with ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 512x512x512 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeVesselVolume.gif)
 
 Computation time for the higher resolution volume is about 0.5seconds.
