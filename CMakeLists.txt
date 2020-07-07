@@ -54,3 +54,6 @@ target_link_libraries(LungSegmentation  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
 
 add_executable(MaskRegistration MaskRegistration.cxx )
 target_link_libraries(MaskRegistration  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
+
+add_executable(FakeLungVolumes FakeLungVolumes.cxx )
+target_link_libraries(FakeLungVolumes  ${ITK_LIBRARIES} ${Boost_LIBRARIES})
