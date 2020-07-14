@@ -128,6 +128,9 @@ int main(int argc, char *argv[]) {
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
+  command.SetOption("randomSeed", "s", false, "Specify the random seed used for initialization of the random fields (time based).");
+  command.AddOptionField("randomSeed", "randomseed", MetaCommand::INT, false);
+
   command.SetOption("Force", "f", false, "Ignore existing files and force overwrite.");
 
   command.SetOption("Verbose", "V", false, "Print more verbose output");
@@ -136,12 +139,18 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  int randomSeed = 0;
+  if (command.GetOptionWasSet("randomSeed")) {
+    randomSeed = command.GetValueAsInt("randomSeed", "randomseed");
+    fprintf(stdout, "random seed value is: %d\n", randomSeed);
+  }
+
   float finalSmooth = 0;
   if (command.GetOptionWasSet("finalSmooth")) {
     finalSmooth = command.GetValueAsFloat("finalSmooth", "finalsmooth");
     fprintf(stdout, "final smoothing kernel is: %f\n", finalSmooth);
   }
-  
+
   int iterations = 2;
   if (command.GetOptionWasSet("Iterations")) {
     iterations = command.GetValueAsInt("Iterations", "iterations");
@@ -190,36 +199,40 @@ int main(int argc, char *argv[]) {
   ImageType::Pointer imageA = ImageType::New();
   ImageType::Pointer imageB = ImageType::New();
   ImageType::IndexType start;
-  start[0] =   0;  // first index on X 
-  start[1] =   0;  // first index on Y
-  start[2] =   0;  // first index on Z
+  start[0] = 0; // first index on X
+  start[1] = 0; // first index on Y
+  start[2] = 0; // first index on Z
 
-  ImageType::SizeType  size;
+  ImageType::SizeType size;
   sscanf(resolution.c_str(), "%lux%lux%lu", &(size[0]), &(size[1]), &(size[2]));
   fprintf(stdout, "generate volume with: %lu %lu %lu voxel\n", size[0], size[1], size[2]);
   ImageType::RegionType region;
-  
-  region.SetSize( size );
-  region.SetIndex( start );
-  imageA->SetRegions( region );
+
+  region.SetSize(size);
+  region.SetIndex(start);
+  imageA->SetRegions(region);
   imageA->Allocate();
-  imageB->SetRegions( region );
+  imageB->SetRegions(region);
   imageB->Allocate();
 
   // set voxel values to random between -0.5 and 0.5
-  using IteratorType = itk::ImageRegionIterator< ImageType >;
-  IteratorType IteratorA( imageA, imageA->GetLargestPossibleRegion() ); 
-  IteratorType IteratorB( imageB, imageB->GetLargestPossibleRegion() ); 
-  srand(time(NULL));
-  for ( IteratorA.GoToBegin(), IteratorB.GoToBegin(); !IteratorA.IsAtEnd() && !IteratorB.IsAtEnd(); ++IteratorA, ++IteratorB) {
-    IteratorA.Set( ((float)rand() / (float)RAND_MAX) -0.5f );
-    IteratorB.Set( ((float)rand() / (float)RAND_MAX) -0.5f );
+  using IteratorType = itk::ImageRegionIterator<ImageType>;
+  IteratorType IteratorA(imageA, imageA->GetLargestPossibleRegion());
+  IteratorType IteratorB(imageB, imageB->GetLargestPossibleRegion());
+  if (command.GetOptionWasSet("randomSeed")) {
+    srand(randomSeed);
+  } else {
+    srand(time(NULL));
+  }
+  for (IteratorA.GoToBegin(), IteratorB.GoToBegin(); !IteratorA.IsAtEnd() && !IteratorB.IsAtEnd(); ++IteratorA, ++IteratorB) {
+    IteratorA.Set(((float)rand() / (float)RAND_MAX) - 0.5f);
+    IteratorB.Set(((float)rand() / (float)RAND_MAX) - 0.5f);
   }
 
   // do Gaussian Smoothing for N iterations
   using FilterType = itk::SmoothingRecursiveGaussianImageFilter<ImageType, ImageType>;
-  //FilterType::Pointer smoothingFilterA = FilterType::New();
-  //FilterType::Pointer smoothingFilterB = FilterType::New();
+  // FilterType::Pointer smoothingFilterA = FilterType::New();
+  // FilterType::Pointer smoothingFilterB = FilterType::New();
   ImageType::Pointer tmpA = imageA;
   ImageType::Pointer tmpB = imageB;
 
@@ -241,22 +254,22 @@ int main(int argc, char *argv[]) {
 
   // now compute the zero-crossing between the two volumes
   ImageType::Pointer erg = ImageType::New();
-  erg->SetRegions( region );
+  erg->SetRegions(region);
   erg->Allocate();
 
-  IteratorType IteratorE( erg, erg->GetLargestPossibleRegion() ); 
-  IteratorType itA( tmpA, tmpA->GetLargestPossibleRegion() ); 
-  IteratorType itB( tmpB, tmpB->GetLargestPossibleRegion() ); 
-  for ( IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
+  IteratorType IteratorE(erg, erg->GetLargestPossibleRegion());
+  IteratorType itA(tmpA, tmpA->GetLargestPossibleRegion());
+  IteratorType itB(tmpB, tmpB->GetLargestPossibleRegion());
+  for (IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
     if (fabs(itA.Get()) < threshold && fabs(itB.Get()) < threshold)
-      IteratorE.Set( 4095.0 );
-    else 
-      IteratorE.Set( 0.0 );
+      IteratorE.Set(4095.0);
+    else
+      IteratorE.Set(0.0);
   }
 
   // we should blur the result?
   ImageType::Pointer result = ImageType::New();
-  if ( finalSmooth == 0 ) { // does this work for a float?
+  if (finalSmooth == 0) { // does this work for a float?
     result = erg;
   } else {
     FilterType::Pointer s = FilterType::New();
@@ -265,8 +278,8 @@ int main(int argc, char *argv[]) {
     s->Update();
     result = s->GetOutput();
     // cleanup smoothing mess
-    IteratorType iter( result, result->GetLargestPossibleRegion() ); 
-    for ( iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
+    IteratorType iter(result, result->GetLargestPossibleRegion());
+    for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
       if (iter.Get() > 4068 || iter.Get() < 0)
         iter.Set(0);
     }
