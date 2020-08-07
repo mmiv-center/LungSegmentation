@@ -1,3 +1,6 @@
+// todo: define attenuation coefficients for the diffent tissues types
+// todo: create void space tissue
+
 #include "itkGDCMImageIO.h"
 #include "itkGDCMSeriesFileNames.h"
 #include "itkImageFileWriter.h"
@@ -107,10 +110,10 @@ int main(int argc, char *argv[]) {
 
   MetaCommand command;
   command.SetAuthor("Hauke Bartsch");
-  command.SetDescription("FakeLungVolumes simulating CT contrast volumes. Exports volume files like nrrd or nifti based on the "
+  command.SetDescription("FakeLungVolumes simulating CT contrast volumes at high resolution. Exports volume files like nrrd or nifti based on the "
                          "provided file extension for the output image. The algorithm calculates the discrete intersection of two iso-surfaces "
                          "from band-pass filtered white noise volumes. Based on the amount of band-pass filtering and the threshold for the "
-                         "intersection detection blood-vessel like pattern can be generated.");
+                         "intersection detection blood-vessel like pattern can be generated that are densely packed around alveoli like structures.");
   command.AddField("outfile", "Exported file name.", MetaCommand::STRING, true);
 
   command.SetOption("Resolution", "r", false, "Specify the resolution of the volume to be generated (in pixel as in 64x64x64).");
@@ -128,7 +131,11 @@ int main(int argc, char *argv[]) {
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
-  command.SetOption("randomSeed", "s", false, "Specify the random seed used for initialization of the random fields (time based).");
+  command.SetOption("VoidSpaces", "w", false, "Create void spaces with a given distance away from the lines. Default is that this option is not used.");
+  command.AddOptionField("VoidSpaces", "voidspaces", MetaCommand::FLOAT, false);
+
+  command.SetOption("randomSeed", "s", false,
+                    "Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.");
   command.AddOptionField("randomSeed", "randomseed", MetaCommand::INT, false);
 
   command.SetOption("Force", "f", false, "Ignore existing files and force overwrite.");
@@ -161,6 +168,12 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("Threshold")) {
     threshold = command.GetValueAsFloat("Threshold", "threshold");
     fprintf(stdout, "threshold is now: %f\n", threshold);
+  }
+
+  float voidSpaces = 0.0001;
+  if (command.GetOptionWasSet("VoidSpaces")) {
+    voidSpaces = command.GetValueAsFloat("VoidSpaces", "voidspaces");
+    fprintf(stdout, "void spaces at a distance of: %f\n", voidSpaces);
   }
 
   int smoothingKernelSize = 7;
@@ -265,6 +278,25 @@ int main(int argc, char *argv[]) {
       IteratorE.Set(4095.0);
     else
       IteratorE.Set(0.0);
+  }
+
+  // if we want to have void spaces we can create them here
+  if (command.GetOptionWasSet("VoidSpaces")) {
+    // use voidSpaces distance away and signs for placing void materials at intensity 1, 2, 3 and 4
+    for (IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
+      if (fabs(itA.Get()) >= (threshold + voidSpaces) && fabs(itB.Get()) >= (threshold + voidSpaces)) {
+        float testA = itA.Get();
+        float testB = itB.Get();
+        int type = 1; // both are negative
+        if (testA > 0 && testB > 0)
+          type = 2;
+        else if (testA > 0 && testB < 0)
+          type = 3;
+        else if (testA < 0 && testB > 0)
+          type = 4;
+        IteratorE.Set(type);
+      }
+    }
   }
 
   // we should blur the result?

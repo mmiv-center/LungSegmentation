@@ -78,6 +78,39 @@ To generate a higher resolution volume
 ```
 The generated output is artificially restricted to 12bit simulating common detector resolution. The intensity range is 0 to 4096. This does not correspond to HU but may be sufficient to generate test data for machine learning algorithms. 
 
+To visualize the vessel generation process additionally to the vessels a four-class void space segmentation can be enabled. These void spaces are defined by the sign of the two band-pass filtered white noise volumes. Here an example:
+```
+./FakeLungVolumes -k 7 -t 0.0001 -w 0.0001 -f 1 -r 128x128x128 /tmp/output.nii
+```
+
+Here are all the options:
+```
+ Command tags: 
+   [ -r [ resolution ] ]
+      = Specify the resolution of the volume to be generated (in pixel as in 64x64x64).
+   [ -k [ kernelSize ] ]
+      = Specify the kernel size for the Gaussian in pixel (7).
+   [ -i [ iterations ] ]
+      = Specify the number of times the Gaussian kernels are applied (2).
+   [ -t [ threshold ] ]
+      = Specify the threshold for zero-crossing (0.0001).
+   [ -f [ finalsmooth ] ]
+      = Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).
+   [ -w [ voidspaces ] ]
+      = Create void spaces with a given distance away from the lines. Default is that this option is not used.
+   [ -s [ randomseed ] ]
+      = Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.
+   [ -f ]
+      = Ignore existing files and force overwrite.
+   [ -V ]
+      = Print more verbose output
+ Command fields: 
+   < outfile > 
+      = Exported file name.
+```
+
+![Fake vessel (gray) volume with 4 colored voids generated with ./FakeLungVolumes -k 7 -t 0.0001 -w 0.001 -r 128x128x128 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeLungVoids.gif)
+
 
 ![Fake vessel volume generated with ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 512x512x512 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeVesselVolume.gif)
 
