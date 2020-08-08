@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<!-- Start a webserver with 'php -S localhost:8080 .' in the current folder. -->
+
+<head>
+	<title>How we can fake blood vessels in 3D</title>
+	<style>
+		canvas {
+			-moz-user-select: none;
+			-webkit-user-select: none;
+			-ms-user-select: none;
+		}
+	</style>
+	<link rel="stylesheet" href="css/bootstrap.min.css" />
+	<link rel="stylesheet" href="vendor/fontawesome-free/css/all.min.css" />
+</head>
+
+<body>
+	<div class="container">
+		<div class="row" style="margin-top: 20px;">
+			<div class="col-12">
+				<H3>What can we do with low-pass filtered white noise?</H3>
+				<p>Here an illustration of the vessel generation process. In order to see what is going on we can
+					start with a simple 1-D case. We create an array with 64 random numbers between
+					-0.5 and +0.5. The bars in the graph below represent the values at 64 line element positions.
+					Each time the random number is close to zero the bar is smallest.
+					The red dots represent positions on the line each time a bar is followed by a bar with the
+					opposite sign. These points are called the zero-crossings of our random list of numbers.</p>
+			</div>
+			<div style="width:95%;">
+				<canvas id="canvas"></canvas>
+			</div>
+		</div>
+		<div class="row">
+			<div class="col-12">
+				<center>
+					<button class="btn btn-primary btn-small" id="randomizeData">Low-pass filter</button>
+				</center>
+			</div>
+		</div>
+		<div class="row">
+			<div class="col-12" style="margin-top: 20px;">
+				<p>Each time we click on the "Low-pass filter" button the initially random list of numbers
+					is smoothed by averaging three consecutive values. As this step is repeated only low frequency variations
+					in the data are retained. High frequency components are removed. In order to show the effect each click
+					applies the filter operation 7 times. As the number of filtering steps increases the
+					values become smoother with larger structures and with fewer zero-crossings.
+				</p>
+				<p>There is a second (hidden) random array of numbers. If you enabled the display of the array in the
+					figure you can see that similar observations apply to this independently smoothed array. It also becomes
+					smoother and different positive and negative regions are established.
+				</p>
+				<p>Summary: In 1-D a low-pass filtered white noise array has zero-crossings that are points. As more smoothing steps are applied fewer points are generated.</p>
+				<p>We now repeat the same process with one additional dimension in 2-D. We will see that instead of points this process will generate lines as zero-crossings.</p>
+				<div style="width:95%;">
+					<canvas id="canvas2D"></canvas>
+				</div>
+				<center>
+					<button class="btn btn-primary btn-small" id="filterData2">Low-pass filter</button>
+				</center>
+				<p style="margin-top: 20px;">Each time we low-pass filter the grid the structures become larger. Enable the display of the zero-crossings in
+					the graph after a couple of smoothing steps. It is easy to see that an independently filtered second field would generate different zero-crossings.
+					The intersection of those two line segments is again a set of points. This pattern continues in dimensions greater than 2.</p>
+				<p>Summary: Each filtered random field of dimension N has a zero-crossing of dimension N-1. The intersection of two zero-crossings of dimension
+					N-1 has dimension N-2.
+				</p>
+				<p style="margin-bottom: 20px;">Ok, so how can we use this? We like to get blood vessels in 3D. The zero-crossings of a low-pass filtered 3-D volume is a 2-D surface.
+					The zero crossings of two low-pass filtered 3D volumes are objects of 2 dimensions less - so instead of surfaces we get 3 - 2 = 1D blood vessels!
+					Here an image of what these lines in 3D can look like.</p>
+				<center>
+					<image src="https://github.com/mmiv-center/LungSegmentation/raw/master/img/FakeVesselVolume.gif" />
+				</center>
+				<p>This volume was generated using the FakeBloodVessel program that implements this procedure for 3D data. There is more structure that we can get
+					from this setup. The space in-between the intersecting
+					zero-crossings can be described by the pair of signs of the low-pass filtered random fields. There are four possible combinations of signs +-+,
+					+--, --+, and --- so we get a random assortment of blobs that will never intersect with our lines. Labels for these void regions are created by
+					FakeBloodVessels if the '-w' option is used. The options gets another argument that specifies how far away from the lines the regions are. The
+					space in between is 'empty'.</p>
+
+				<p>Ok, what next? We can now place objects into the different regions. We have i) empty space, ii) vessel like structures, and iii) four different void
+					regions.</p>
+			</div>
+		</div>
+	</div>
+	<script src="vendor/jquery/jquery.min.js"></script>
+	<script src="js/bootstrap.min.js"></script>
+	<script src="http://colorbrewer2.org/export/colorbrewer.js"></script>
+	<script src="js/Chart.min.js"></script>
+	<script src="js/utils.js"></script>
+	<script src="js/all.js"></script>
+</body>
+
+</html>
