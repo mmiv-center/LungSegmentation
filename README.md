@@ -120,7 +120,12 @@ Computation time for the higher resolution volume is about 0.5seconds.
 
 In order to explain the process geometrically the 'explain' sub-directory contains a website that performs this computation in JavaScript. By changing the number of iterations of the smoothing in 1-D, 2-D, and 3-D the different features can be visualized.
 
-There are a number of extensions to this framework. One is that multiple vessel like structures can be generated with guaranteed properties. They will never intersect and keep a given distance from each other. Those hugging lines can be generated using the -z option to specify the crossing in conjunction with the seed option -s to make sure multiple runs of the program generate the same noise pattern. Given the same seed but different crossing levels vessel structures emerge. Here an example of the resulting 3 vessel like structures using Iso-Surface displays.
+There are a number of extensions to this framework. One is that multiple vessel like structures can be generated with guaranteed properties. They will never intersect and keep a given distance from each other. Those hugging lines can be generated using the -z option to specify the crossing in conjunction with the seed option -s to make sure multiple runs of the program generate the same noise pattern. Given the same seed but different crossing levels vessel structures emerge. Here an example of the resulting 3 vessel like structures using Iso-Surface displays. This data was generated using three calls to the program:
+```
+./FakeLungVolumes -s 42 -z 0 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output.nii
+./FakeLungVolumes -s 42 -z 0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output2.nii
+./FakeLungVolumes -s 42 -z -0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output3.nii
+```
 
 ![Fake vessel volume with 3 sets of vessels generated with ./FakeLungVolumes -s 42 -z 0 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output.nii; ./FakeLungVolumes -s 42 -z 0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output2.nii; ./FakeLungVolumes -s 42 -z -0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output3.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setsNeverIntersectingIsoSurf.gif)
 
