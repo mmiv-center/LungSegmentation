@@ -100,6 +100,8 @@ Here are all the options:
       = Create void spaces with a given distance away from the lines. Default is that this option is not used.
    [ -s [ randomseed ] ]
       = Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.
+   [ -z [ zero ] ]
+      = Specify at what level the intersection should be performed (0).
    [ -f ]
       = Ignore existing files and force overwrite.
    [ -V ]
@@ -115,3 +117,13 @@ Here are all the options:
 ![Fake vessel volume generated with ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 512x512x512 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeVesselVolume.gif)
 
 Computation time for the higher resolution volume is about 0.5seconds.
+
+In order to explain the process geometrically the 'explain' sub-directory contains a website that performs this computation in JavaScript. By changing the number of iterations of the smoothing in 1-D, 2-D, and 3-D the different features can be visualized.
+
+There are a number of extensions to this framework. One is that multiple vessel like structures can be generated with guaranteed properties. They will never intersect and keep and given distance from each other. Those hugging lines can be generated using the -z option in conjunction with the seed option -s. Given the same seed but different crossing levels vessel structures emerge. Here an example of the resulting 3 volumes using Iso-Surface displays.
+
+![Fake vessel volume with 3 sets of vessels generated with ./FakeLungVolumes -s 42 -z 0 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output.nii; ./FakeLungVolumes -s 42 -z 0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output2.nii; ./FakeLungVolumes -s 42 -z -0.002 -k 7 -t 0.0001 -f 0.4 -r 192x192x192 /tmp/output3.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setsNeverIntersectingIsoSurf.gif)
+
+At lower resolution and in 2-D cross-section:
+
+![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setsNeverIntersecting.gif)
