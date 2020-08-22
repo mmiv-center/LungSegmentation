@@ -106,7 +106,12 @@
 				<p>We call it low-pass filtering, why not band-pass filtered white noise? Oh, so yeah, we start with all kind of spatial frequencies in white noise, but by averaging we are retaining only the low-frequency variations. Each time we average we loose some of the higher-frequencies.				  
 				  .</p>
 				<p>Implementing a low-pass filter using averaging on a 6-neighbors 3-D stencil and applying it multiple times is not a good idea in practice. Here on this web-page we do this as an illustration only. It tends to still show the features discussed. The FakeBloodVessel application is using larger filter kernels to reduce the tendency of the smoothed data to show a diamond shaped preference for the primary directions. Applying the smoothing operation once in frequency space is the preferred way to implement this step.</p>
-				<p></p>
+				<p>Detailed inspection of the generated blood vessel like structures shows features also found in real-world data. Artifacts such as broken up vessels are caused in microscopy due to insufficient contrast and small vessel diameters close to the resolution limit of the sampled voxels. Simplier features such as Y-junctions can be found and the different type of vessels can come very close to each other.
+				  <center>
+				    <img style="width: 100%;" src="https://github.com/mmiv-center/LungSegmentation/raw/master/img/3SetsIsoHighRes.png"/>
+				  </center>
+
+				</p>
 			</div>
 		</div>
 	</div>
