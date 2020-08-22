@@ -547,7 +547,7 @@ function createIsoSurface( values, name, color ) {
     geometry.computeFaceNormals();
     geometry.computeVertexNormals();
     
-    var colorMaterial =  new THREE.MeshLambertMaterial( {color: color, side: THREE.DoubleSide, transparent: false, opacity: 0.9} );
+    var colorMaterial =  new THREE.MeshLambertMaterial( {color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.5} );
     var oldIsoSurface = scene.getObjectByName(name);
     if (oldIsoSurface) { // remove the old surface
 	oldIsoSurface.geometry.dispose();
@@ -708,31 +708,36 @@ function average(data) {
 }
 step2D = 0;
 document.getElementById('filterData2').addEventListener('click', function() {
-	if (step2D < 5) {
-		chartData2D[0].data = smooth2D(chartData2D[0].data);
-	} else if (step2D < 17) {
-		for (var i = 0; i < 7; i++) {
-			chartData2D[0].data = smooth2D(chartData2D[0].data);
-		}
+    if (step2D < 5) {
+	chartData2D[0].data = smooth2D(chartData2D[0].data);
+    } else if (step2D < 100) {
+	for (var i = 0; i < 7; i++) {
+	    chartData2D[0].data = smooth2D(chartData2D[0].data);
+	    step2D++;
 	}
-	values2Color();
-	computeZeroCrossings2D();
-	step2D++;
-	window.myLine2D.update();
+    }
+    values2Color();
+    computeZeroCrossings2D();
+    step2D++;
+    jQuery('span.step2D').text(step2D);
+    window.myLine2D.update();
 });
 step3D = 0;
 document.getElementById('filterData3').addEventListener('click', function() {
     if (step3D < 5) {
 	values = filter3d(values, "IsoSurface", "#5577ff");
 	values2 = filter3d(values2, "IsoSurface2", "#ffff22");
-    } else if (step3D < 17) {
+    } else if (step3D < 100) {
 	for (var i = 0; i < 7; i++) {
 	    values = filter3d(values, "IsoSurface", "#5577ff");
 	    values2 = filter3d(values2, "IsoSurface2", "#ffff00");
+	    if (i < 6)
+		step3D++;
 	}
     } 
     computeZeroCrossings3D(values, values2);
     step3D++;
+    jQuery('span.step3D').text(step3D);
     //window.myLine2D.update();
 });
 
@@ -751,7 +756,7 @@ document.getElementById('randomizeData').addEventListener('click', function() {
 		chartData[1].data = chartData[1].data.map(function(a) {
 			return a - mean1;
 		});
-	} else if (step < 7) {
+	} else if (step < 49) {
 		console.log("smooth the two sets of points independently from each other...");
 		for (var i = 0; i < 7; i++) {
 			// smooth with Gaussian
@@ -766,9 +771,12 @@ document.getElementById('randomizeData').addEventListener('click', function() {
 			chartData[1].data = chartData[1].data.map(function(a) {
 				return a - mean1;
 			});
+		    step = step + 1;
 		}
 	}
-	step = step + 1;
+    step = step + 1;
+    jQuery('span.step').text(step);
+    
 
 	computeZeroCrossings();
 
