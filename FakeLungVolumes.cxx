@@ -128,6 +128,9 @@ int main(int argc, char *argv[]) {
   command.SetOption("Threshold", "t", false, "Specify the threshold for zero-crossing (0.0001).");
   command.AddOptionField("Threshold", "threshold", MetaCommand::FLOAT, false);
 
+  command.SetOption("Zero", "z", false, "Specify at what level the intersection should be performed (0).");
+  command.AddOptionField("Zero", "zero", MetaCommand::FLOAT, false);
+
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
@@ -168,6 +171,12 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("Threshold")) {
     threshold = command.GetValueAsFloat("Threshold", "threshold");
     fprintf(stdout, "threshold is now: %f\n", threshold);
+  }
+
+  float zero = 0;
+  if (command.GetOptionWasSet("Zero")) {
+    zero = command.GetValueAsFloat("Zero", "zero");
+    fprintf(stdout, "zero-crossing at: %f\n", zero);
   }
 
   float voidSpaces = 0.0001;
@@ -274,7 +283,7 @@ int main(int argc, char *argv[]) {
   IteratorType itA(tmpA, tmpA->GetLargestPossibleRegion());
   IteratorType itB(tmpB, tmpB->GetLargestPossibleRegion());
   for (IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
-    if (fabs(itA.Get()) < threshold && fabs(itB.Get()) < threshold)
+    if ((itA.Get() < (zero + threshold) && (itA.Get() > (zero - threshold))) && (itB.Get() < (zero + threshold) && (itB.Get() > (zero - threshold))))
       IteratorE.Set(4095.0);
     else
       IteratorE.Set(0.0);
