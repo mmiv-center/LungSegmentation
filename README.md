@@ -132,3 +132,7 @@ There are a number of extensions to this framework. One is that multiple vessel 
 At lower resolution and in 2-D cross-section:
 
 ![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setsNeverIntersecting.gif)
+
+As a final example here a closeup of a de novo in silico complex tissue.
+
+![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setWithVoids.png)
