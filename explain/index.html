@@ -23,8 +23,8 @@
 					start with a simple 1-D case. We create an array with 64 random numbers between
 					-0.5 and +0.5. The bars in the graph below represent the values at 64 line element positions. For positive values the bar goes up, for negative values the bar goes down.
 					Each time the random number is close to zero the bar is shortest.
-					The red dots represent positions on the line each time a bar is followed by another bar with the
-					opposite sign. These points indicate the zero-crossings of our random list of numbers.</p>
+					The red dots represent positions on the line where the sign of the bars change, each time a bar is followed by another bar with the
+					opposite sign. These points indicate the crossings of the zero-line of our random list of numbers.</p>
 			</div>
 			<div style="width:95%;">
 				<canvas id="canvas"></canvas>
@@ -41,16 +41,18 @@
 			<div class="col-12" style="margin-top: 20px;">
 				<p>Each time we click on the "Low-pass filter" button the initially random list of numbers
 					is smoothed by averaging three consecutive values. As this step is repeated only low frequency variations
-					in the data are retained. High frequency components are removed. In order to show the effect each click
-					applies the filter operation 7 times. As the number of filtering steps increases the
-					values become smoother with larger structures and with fewer zero-crossings.
+					in the data are retained. High frequency components are removed. In order to show this low-pass effect each click
+					applies the filter initially once later 7 times. As the number of filtering steps increases the
+					values become smaller (rescaling is used for display) and neighboring values become more similar to each other. We see larger structures dominate with fewer and fewer zero-crossings.
 				</p>
-				<p>There is a second (hidden) random array of numbers. If you enabled the display of the array in the
+				<p>There is a second (hidden) random array of numbers. If you enabled the display of "noise 2" in the
 					figure you can see that similar observations apply to this independently smoothed array. It also becomes
-					smoother and different positive and negative regions are established.
+					smoother and positive-sign (up) and negative (down) regions are established.
 				</p>
-				<p>Summary: In 1-D a low-pass filtered white noise array has zero-crossings that are points (have dimension 0). As more smoothing steps are applied fewer points are generated.</p>
-				<p>We now repeat the same process with one additional dimension in 2-D. We will see that instead of points this process will generate lines as zero-crossings.</p>
+				<p><b>Summary</b>: In 1-D a low-pass filtered white noise array has zero-crossings that are points (have dimension 0). As more smoothing steps are applied fewer points are generated.</p>
+				<p>We now repeat the same process with one additional dimension. An array of arrays (2-D) can be represented as a matrix so we can display this as an image of size 64x64.
+				  At each of those 64x64 pixel we have a random value between -0.5 and +0.5 displayed here as colored circle (red is positive sign, blue regions indicate negative sign). Regions where
+				the sign changes are displayed in intermediate yellow color.</p>
 				<div style="width:95%;">
 					<canvas id="canvas2D"></canvas>
 				</div>
@@ -59,16 +61,16 @@
 				</center>
 				<p style="margin-top: 20px;">Each time we low-pass filter the grid the structures become larger. Enable the display of the zero-crossings in
 					the graph after a couple of smoothing steps. It is easy to see that an independently filtered second field would generate different zero-crossings.
-				  The intersection of those two line segments is again a set of points. This pattern continues in dimensions greater than 2.</p>
+				  The intersection of those two independent sets of lines is a set of points. This pattern continues in dimensions greater than 2.</p>
 
-				<p style="margin-top: 20px;">One more dimension! To not clutter our screen we will skip the display of the random values and only show the zero-crossings. We will do this twice on two independently generated and filtered white noise volumes. The zero-crossings are calculated using a marching cubes algorithm so we can visulize them as surfaces inside our data cube, one in blue for the second random field in yellow. In 3D this results for each random field in a 3-1=2D manifold (surface). Additionally to the two surfaces we also mark the locations in our 32x32x32 volume where the zero-crossings of both manifolds intersect, or more correcly, where they are both sufficiently close to zero as red cubes.<p>
+				<p style="margin-top: 20px;">One more dimension! To not clutter our screen too much we will skip the display of the random values and only show the zero-crossings. We will do this twice on two independently generated and filtered white noise volumes. The zero-crossings are calculated using a marching cubes algorithm so we can visulize them as surfaces inside our data cube, one in blue for the second random field in yellow. In 3D this results for each random field in a 3-1=2D manifold (surface). Additionally to the two surfaces we also mark the locations in our 32x32x32 volume where the zero-crossings of both manifolds intersect, or more correcly, where they are both sufficiently close to zero as red cubes.<p>
 			    
 			        <div id="ThreeJS" style="width: 90%; height: 400px; overflow: hidden; margin-bottom: 10px;"></div>
 				<center>
 					<button class="btn btn-primary btn-small" id="filterData3" style="margin-bottom: 20px;">Low-pass filter (iteration: <span class="step3D">0</span>)</button>
 				</center>
 
-				<p style="margin-top: 20px;">After many low-pass filter steps you can see that the intersections of the two manifolds are forming 3-1-1=1D manifolds - lines.<p>
+				<p style="margin-top: 20px;">After many low-pass filter steps it becomes apparent that the intersections of the two 2-D manifolds are forming 3-1-1=1D manifolds - lines.<p>
 				
 				
 				<p><b>Summary:</b> Each filtered random field of dimension N has a zero-crossing of dimension N-1. The intersection of two zero-crossings of dimension
@@ -76,25 +78,25 @@
 				</p>
 
 				<p style="margin-bottom: 20px;">Ok, so how can we use this? We like to generate de novo data that in same respects resemble microvascular tissue. The zero-crossings of a low-pass filtered 3-D volume is a 2-D surface.
-					The zero crossings of two low-pass filtered 3D volumes are objects of 2 dimensions less - so instead of surfaces we get 3 - 2 = 1D lines. Can we interpret those as standins for blood vessels?
+					The zero crossings of two low-pass filtered 3D volumes are objects of 2 dimensions less - so instead of surfaces we get 3 - 2 = 1-D lines. Can we interpret those as standins for blood vessels?
 					Here an short movie of what these lines in 3D can look like if we increase the resolution of the volume.</p>
 				<center>
 					<a href="https://github.com/mmiv-center/LungSegmentation/raw/master/img/FakeVesselVolume.gif">Link to the Movie</a>
 				</center>
-				<p>This volume was generated using the FakeBloodVessel program that implements this procedure for 3D data. There is more structure that we can get
+				<p>This volume was generated using the FakeBloodVessel program that implements this procedure for 3D data. The output are either labelled volumes (class 0: background, class 1: line-like structures) or a smoothed label field that simulates a blurring image aquisition. There is more structure that we can get
 					from this setup. The space in-between the intersecting
 					zero-crossings can be described by the pair of signs of the low-pass filtered random fields. There are four possible combinations of signs ++,
-					+-, -+, and -- so we get a random assortment of blobs that will never intersect with our lines. Labels for these void regions are created by
-					the application FakeBloodVessels if the '-w' option is used. The options gets another argument that specifies how far away from the lines the regions are. The
-					space in between is 'empty'.</p>
+					+-, -+, and -- so we get a random assortment of blobs that will never intersect with our lines. Labels for these <i>void<-i> regions are created by
+					the application FakeBloodVessels if the '-w' option is used. The option gets another argument that specifies how far away from the lines the regions are placed. The
+					space in between is considered 'empty' (class 0).</p>
 
 				<p>Ok, what next? We can now place objects into the different regions. We have i) empty space, ii) vessel like structures, and iii) four different void
 				  regions.</p>
 				
 				<h4>Notes</h4>
-				<p>We call it low-pass filtering, why not band-pass filtered white noise? Oh, so yeah, so we start with all kind of frequencies even high-frequency variations in intensity, but by averaging we are retaining only the low-frequency variations. Each time we average we loose some of the high-frequencies.				  
+				<p>We call it low-pass filtering, why not band-pass filtered white noise? Oh, so yeah, so we start with all kind of frequencies even high-frequency variations in intensity, but by averaging we are retaining only the low-frequency variations. Each time we average we loose some of the higher-frequencies.				  
 				  .</p>
-				<p>Implementing a low-pass filter using averaging on a 6-neighbors 3D stencil and applying it multiple times is not a good idea in practice. Here we do this as an illustration only. It tends to still show the features discussed. The FakeBloodVessel application is using larger filter kernls to reduce the tendency of the smoothed data to be less smooth in diagonal directions. Applying the smoothing operation once in frequency space is another (future) todo.</p>
+				<p>Implementing a low-pass filter using averaging on a 6-neighbors 3D stencil and applying it multiple times is not a good idea in practice. Here on this web-page we do this as an illustration only. It tends to still show the features discussed. The FakeBloodVessel application is using larger filter kernls to reduce the tendency of the smoothed data to be less smooth in diagonal directions. Applying the smoothing operation once in frequency space is another (future) todo.</p>
 			</div>
 		</div>
 	</div>
