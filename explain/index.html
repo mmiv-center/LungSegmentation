@@ -50,8 +50,8 @@
 					smoother and positive-sign (up) and negative (down) regions are established.
 				</p>
 				<p><b>Summary</b>: In 1-D a low-pass filtered white noise array has zero-crossings that are points (have dimension 0). As more smoothing steps are applied fewer points are generated.</p>
-				<p>We now repeat the same process with one additional dimension. An array of arrays (2-D) can be represented as a matrix so we can display this as an image of size 64x64.
-				  At each of those 64x64 pixel we have a random value between -0.5 and +0.5 displayed here as colored circle (red is positive sign, blue regions indicate negative sign). Regions where
+				<p>We now repeat the same process with one additional dimension. Our 1-dimensional array of numbers becomes a 2-dimensional array of arrays that can be represented as an image of size 64x64.
+				  At each of those 64x64 pixel locations we have a random value between -0.5 and +0.5 displayed here as colored circle (red-ish color for regions with positive sign, blue-ish regions indicate negative sign). Regions where
 				the sign changes are displayed in intermediate yellow color.</p>
 				<div style="width:95%;">
 					<canvas id="canvas2D"></canvas>
@@ -83,11 +83,11 @@
 				<center>
 					<a href="https://github.com/mmiv-center/LungSegmentation/raw/master/img/FakeVesselVolume.gif">Link to the Movie</a>
 				</center>
-				<p>This volume was generated using the FakeBloodVessel program that implements this procedure for 3D data. The output are either labelled volumes (class 0: background, class 1: line-like structures) or a smoothed label field that simulates a blurring image aquisition.</p>
-				<p>There is more structure that we can get
-					from this setup. The space in-between the intersecting
+				<p>This volume was generated using the FakeBloodVessel program that implements this procedure for 3D data. The output are either labelled volumes (two classes, background and line-like structures) or a smoothed label field that simulates a blurring image aquisition.</p>
+				<p>There is a lot more structure that we can get
+					from this setup. The space in between the intersecting
 					zero-crossings can be described by the pair of signs of the low-pass filtered random fields. There are four possible combinations of signs ++,
-					+-, -+, and -- so we get a random assortment of void spaces that will never intersect with our lines. Labels for these <i>void</i> regions are created by
+					+-, -+, and -- so we get a random assortment of 4 types of void spaces that never intersect with our lines. Labels for these <i>void</i> regions are created by
 					the application FakeBloodVessels using '-w'. The argument for option '-w' specifies how far away from the lines the regions are placed. The
 				  space in between is considered 'empty' (class 0).</p>
 				<p>More? Yes, there is more, The model is also able to create independent vessel tress that are guaranteed to never intersect with each other. Those <i>hugging</i> lines are
@@ -107,8 +107,14 @@
 				  .</p>
 				<p>Implementing a low-pass filter using averaging on a 6-neighbors 3-D stencil and applying it multiple times is not a good idea in practice. Here on this web-page we do this as an illustration only. It tends to still show the features discussed. The FakeBloodVessel application is using larger filter kernels to reduce the tendency of the smoothed data to show a diamond shaped preference for the primary directions. Applying the smoothing operation once in frequency space is the preferred way to implement this step.</p>
 				<p>Detailed inspection of the generated blood vessel like structures shows features also found in real-world data. Artifacts such as broken up vessels are caused in microscopy due to insufficient contrast and small vessel diameters close to the resolution limit of the sampled voxels. Simplier features such as Y-junctions can be found and the different type of vessels can come very close to each other.
-				  <center>
+				  <center style="margin-bottom: 10px;">
 				    <img style="width: 100%;" src="https://github.com/mmiv-center/LungSegmentation/raw/master/img/3SetsIsoHighRes.png"/>
+				  </center>
+
+				  <p>Enabling the display of the 4 types of void spaces we arrive at a complex tissue like structure generated de novo and in silico.</p> 
+
+				  <center style="margin-bottom: 10px;">
+				    <img style="width: 100%;" src="https://github.com/mmiv-center/LungSegmentation/raw/master/img/3setWithVoids.png"/>
 				  </center>
 
 				</p>
