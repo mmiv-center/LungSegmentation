@@ -1,5 +1,5 @@
 // todo: define attenuation coefficients for the diffent tissues types
-// todo: create void space tissue
+// todo: use a low frequency dataset as a mask for high frequency structures (cells in organs)
 
 #include "itkGDCMImageIO.h"
 #include "itkGDCMSeriesFileNames.h"
@@ -128,14 +128,24 @@ int main(int argc, char *argv[]) {
   command.SetOption("Threshold", "t", false, "Specify the threshold for zero-crossing (0.0001).");
   command.AddOptionField("Threshold", "threshold", MetaCommand::FLOAT, false);
 
-  command.SetOption("Zero", "z", false, "Specify at what level the intersection should be performed (0).");
+  // we could use a pair of values x,y for the threshold at each of the two fields, that would rotate the
+  // vessels - r, theta
+  command.SetOption("Zero", "z", false, "Specify at what value the intersection should be calculated (0).");
   command.AddOptionField("Zero", "zero", MetaCommand::FLOAT, false);
 
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
-  command.SetOption("VoidSpaces", "w", false, "Create void spaces with a given distance away from the lines. Default is that this option is not used.");
+  command.SetOption("VoidSpaces", "w", false,
+                    "Create void spaces with a given distance away from the lines. Default is that this option is not used.\nIn the resulting volume 0 will be "
+                    "the gap space right next to each vessel (label 4095) with 1, 2, 3, 4 the values of voxel that are in void space.");
   command.AddOptionField("VoidSpaces", "voidspaces", MetaCommand::FLOAT, false);
+
+  command.SetOption("addLesion", "l", false, "Specify a lesion of a specific size (5). Requires the option VoidSpaces.");
+  command.AddOptionField("addLesion", "addlesion", MetaCommand::INT, false);
+
+  command.SetOption("Mask", "m", false, "Specify a mask file (assumption is that the mask fits in resolution with the volume created).");
+  command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
 
   command.SetOption("randomSeed", "s", false,
                     "Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.");
@@ -171,6 +181,14 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("Threshold")) {
     threshold = command.GetValueAsFloat("Threshold", "threshold");
     fprintf(stdout, "threshold is now: %f\n", threshold);
+  }
+
+  std::string maskName = ""; // we should make sure that we have a way to specify what label to use in the mask as well
+  // we could use a <filename>,label1,label2,... way to specify options. Or another argument or list of arguments. For
+  // now just use all labels.
+  if (command.GetOptionWasSet("Mask")) {
+    maskName = command.GetValueAsString("Mask", "mask");
+    fprintf(stdout, "Mask volume requested: %s\n", maskName.c_str());
   }
 
   float zero = 0;
@@ -217,6 +235,21 @@ int main(int argc, char *argv[]) {
   //  typedef itk::Image<PixelType, Dimension> ImageType;
   typedef itk::Image<FloatPixelType, Dimension> ImageType;
   typedef itk::Image<OutputPixelType, Dimension> OutputImageType;
+
+  // mask stuff
+  OutputImageType::Pointer mask;
+  if (command.GetOptionWasSet("Mask")) {
+    typedef itk::ImageFileReader<OutputImageType> MaskReaderType;
+    MaskReaderType::Pointer maskreader = MaskReaderType::New();
+    maskreader->SetFileName(maskName);
+    try {
+      maskreader->Update();
+      mask = maskreader->GetOutput();
+      mask->DisconnectPipeline();
+    } catch (...) {
+      mask = ITK_NULLPTR;
+    }
+  }
 
   ImageType::Pointer imageA = ImageType::New();
   ImageType::Pointer imageB = ImageType::New();
@@ -265,6 +298,19 @@ int main(int argc, char *argv[]) {
     sFA->SetInput(tmpA);
     sFA->Update();
     tmpA = sFA->GetOutput();
+
+    // if we have a mask after every smoothing step we should tweak the volume
+    if (mask != ITK_NULLPTR) {
+      // assumption is that we have the same size, we can therefore iterate and adjust the border locations
+      // of the label in the mask to be a zero-crossing. This has to be done in 3D coordinates... slow?
+      // we should have a list of lists of voxel locations that are a border in the image. Based on how many
+      // elements are in the list we can change shift the values towards zero. But what if two orthogonal
+      // elements disagree? Can they? Because they share one voxel the cannot - that voxel has a fixed sign.
+      // But the other two voxel can be larger than the seed voxel or smaller, we can average the combined effect
+      // they have and adjust the nudge the intensities in that direction. - This is not geometry.... Isn't it
+      // better to adjust the frequency spectrum of the data to start with? There we could filter in frequency
+      // space and get two well defined frequencies.
+    }
   }
   for (int i = 0; i < numSmoothingSteps; i++) {
     FilterType::Pointer sFB = FilterType::New();
@@ -304,6 +350,114 @@ int main(int argc, char *argv[]) {
         else if (testA < 0 && testB > 0)
           type = 4;
         IteratorE.Set(type);
+      }
+    }
+    // add a lesion if we have to
+    if (command.GetOptionWasSet("addLesion")) {
+      int lesion_size = command.GetValueAsInt("addLesion", "addlesion");
+      // size of the lesion should be in lesion_size
+      if (lesion_size < 1) {
+        fprintf(stderr, "ERROR: lesion size must be greater than 0. Set to 1 and continue.\n");
+        lesion_size = 1;
+      }
+
+      // make a copy of erg with only the void space
+      ImageType::Pointer ergVoidSpace = ImageType::New();
+      ergVoidSpace->SetRegions(region);
+      ergVoidSpace->Allocate();
+
+      //
+      IteratorType ierg(erg, erg->GetLargestPossibleRegion());
+      IteratorType iergVoidSpace(ergVoidSpace, ergVoidSpace->GetLargestPossibleRegion());
+      for (ierg.GoToBegin(), iergVoidSpace.GoToBegin(); !iergVoidSpace.IsAtEnd() && !ierg.IsAtEnd(); ++ierg, ++iergVoidSpace) {
+        if (ierg.Get() == 1 || ierg.Get() == 2 || ierg.Get() == 3 || ierg.Get() == 4) {
+          iergVoidSpace.Set(1);
+        } else {
+          iergVoidSpace.Set(0);
+        }
+      }
+      // for this 0/1 volume we want to shrink it (to be able to ensure a lesion that is spherical)
+      using StructuringElementType = itk::BinaryBallStructuringElement<OutputPixelType, 3>;
+      using ErodeFilterType = itk::BinaryErodeImageFilter<ImageType, ImageType, StructuringElementType>;
+      StructuringElementType structuringElement;
+      structuringElement.SetRadius(1); // 3x3 structuring element
+      structuringElement.CreateStructuringElement();
+      ErodeFilterType::Pointer binaryErode = ErodeFilterType::New();
+      binaryErode->SetKernel(structuringElement);
+      binaryErode->SetInput(ergVoidSpace);
+      binaryErode->SetErodeValue(lesion_size); // size of the lesion
+      binaryErode->Update();
+      ImageType::Pointer placeForLesion = binaryErode->GetOutput();
+
+      // now we have to look for a random point in that volume (are there any voxel we can use?)
+      IteratorType iplaceForLesion(placeForLesion, placeForLesion->GetLargestPossibleRegion());
+      int validVoxel = 0;
+      for (iplaceForLesion.GoToBegin(); !iplaceForLesion.IsAtEnd(); ++iplaceForLesion) {
+        if (iplaceForLesion.Get() == 1) {
+          validVoxel++;
+        }
+      }
+      if (validVoxel < 1) {
+        fprintf(stderr, "ERROR: no valid voxel found for a lesion.\n");
+        return EXIT_FAILURE;
+      }
+
+      // create a random ellipsoid shape
+      {
+        using EllipseType = itk::EllipseSpatialObject<3>;
+        ImageType::SizeType esize;
+        esize[0] = lesion_size;
+        esize[1] = lesion_size;
+        esize[2] = lesion_size;
+        SpatialObjectToImageFilterType::Pointer imageFilter = SpatialObjectToImageFilterType::New();
+        imageFilter->SetSize(esize);
+        ImageType::SpacingType spacing;
+        spacing[0] = 1.0;
+        spacing[1] = 1.0;
+        spacing[2] = 1.0;
+        imageFilter->SetSpacing(spacing);
+
+        EllipseType::Pointer ellipse = EllipseType::New();
+        EllipseType::ArrayType radiusArray;
+        radiusArray[0] = lesion_size;
+        radiusArray[1] = lesion_size / 2;
+        radiusArray[1] = lesion_size / 2;
+        // ellipse->SetRadiusInObjectSpace(  size[0] * 0.2 * spacing[0] );
+        ellipse->SetRadiusInObjectSpace(radiusArray);
+
+        ellipse->SetDefaultInsideValue(2048);
+        ellipse->SetDefaultOutsideValue(0);
+
+        using TransformType = EllipseType::TransformType;
+
+        TransformType::Pointer transform = TransformType::New();
+
+        transform->SetIdentity();
+
+        TransformType::OutputVectorType translation;
+        translation[0] = lesion_size / 2.0;
+        translation[1] = lesion_size / 2.0;
+        translation[2] = lesion_size / 2.0;
+        transform->Translate(translation, false);
+
+        ellipse->SetObjectToParentTransform(transform);
+        imageFilter->SetInput(ellipse);
+        imageFilter->SetUseObjectValue(true);
+        imageFilter->SetOutsideValue(0);
+      }
+      // pick a location for the lesion
+      unsigned int randomVoxel = rand() % validVoxel;
+
+      // in the original volume put an object at this location
+      int validVoxel = 0;
+      for (iplaceForLesion.GoToBegin(), ierg.GoToBegin(); !iplaceForLesion.IsAtEnd() && !ierg.IsAtEnd(); ++iplaceForLesion, ++ierg) {
+        if (iplaceForLesion.Get() == 1) {
+          if (randomVoxel == validVoxel) {
+            ierg.Set(2048);
+            break;
+          }
+          validVoxel++;
+        }
       }
     }
   }
