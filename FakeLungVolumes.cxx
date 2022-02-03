@@ -36,6 +36,9 @@
 #include "itkScalarImageToHistogramGenerator.h"
 #include "itkWindowedSincInterpolateImageFunction.h"
 
+#include "itkEllipseSpatialObject.h"
+#include "itkSpatialObjectToImageFilter.h"
+
 #include "gdcmAnonymizer.h"
 #include "gdcmAttribute.h"
 #include "gdcmDataSetHelper.h"
@@ -402,13 +405,30 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
       }
 
-      // create a random ellipsoid shape
+      // pick a location for the lesion
+      unsigned int randomVoxel = rand() % validVoxel;
+      ImageType::IndexType ellipse_center;
+      // what is the x/y/z location here?
+      for (iplaceForLesion.GoToBegin(); !iplaceForLesion.IsAtEnd(); ++iplaceForLesion) {
+        if (iplaceForLesion.Get() == 1) {
+          if (validVoxel == randomVoxel) {
+            ellipse_center = iplaceForLesion.GetIndex();
+            break;
+          }
+          validVoxel++;
+        }
+      }
+
+      // create a random ellipsoid shape and orientation
       {
         using EllipseType = itk::EllipseSpatialObject<3>;
         ImageType::SizeType esize;
         esize[0] = lesion_size;
         esize[1] = lesion_size;
         esize[2] = lesion_size;
+
+        using SpatialObjectToImageFilterType = itk::SpatialObjectToImageFilter<EllipseType, ImageType>;
+
         SpatialObjectToImageFilterType::Pointer imageFilter = SpatialObjectToImageFilterType::New();
         imageFilter->SetSize(esize);
         ImageType::SpacingType spacing;
@@ -425,7 +445,7 @@ int main(int argc, char *argv[]) {
         // ellipse->SetRadiusInObjectSpace(  size[0] * 0.2 * spacing[0] );
         ellipse->SetRadiusInObjectSpace(radiusArray);
 
-        ellipse->SetDefaultInsideValue(2048);
+        ellipse->SetDefaultInsideValue(1);
         ellipse->SetDefaultOutsideValue(0);
 
         using TransformType = EllipseType::TransformType;
@@ -435,6 +455,16 @@ int main(int argc, char *argv[]) {
         transform->SetIdentity();
 
         TransformType::OutputVectorType translation;
+        // we need to rotate first
+        const double degreesToRadians = std::atan(1.0) / 45.0;
+        const double angle = /*angleInDegrees*/ (rand() % 180) * degreesToRadians;
+
+        TransformType::OutputVectorType axis;
+        axis[0] = 1; // todo: random axis
+        axis[1] = 0;
+        axis[2] = 0;
+        transform->Rotate3D(axis, -angle, false);
+
         translation[0] = lesion_size / 2.0;
         translation[1] = lesion_size / 2.0;
         translation[2] = lesion_size / 2.0;
@@ -444,19 +474,24 @@ int main(int argc, char *argv[]) {
         imageFilter->SetInput(ellipse);
         imageFilter->SetUseObjectValue(true);
         imageFilter->SetOutsideValue(0);
-      }
-      // pick a location for the lesion
-      unsigned int randomVoxel = rand() % validVoxel;
+        imageFilter->Update();
+        ImageType::Pointer ell = imageFilter->GetOutput();
 
-      // in the original volume put an object at this location
-      int validVoxel = 0;
-      for (iplaceForLesion.GoToBegin(), ierg.GoToBegin(); !iplaceForLesion.IsAtEnd() && !ierg.IsAtEnd(); ++iplaceForLesion, ++ierg) {
-        if (iplaceForLesion.Get() == 1) {
-          if (randomVoxel == validVoxel) {
+        ImageType::RegionType outputRegion = ell->GetLargestPossibleRegion();
+        ImageType::RegionType::IndexType outputStart;
+        outputStart[0] = ellipse_center[0] - lesion_size / 2; // shift this region to the upper corner of the ellipse shape
+        outputStart[1] = ellipse_center[1] - lesion_size / 2;
+        outputStart[2] = ellipse_center[2] - lesion_size / 2;
+        outputRegion.SetSize(esize);
+        outputRegion.SetIndex(outputStart);
+
+        // now we need a region iterator in the output volume for the ellipse
+        IteratorType iellipse(ell, ell->GetLargestPossibleRegion());
+        IteratorType ierg(erg, outputRegion);
+        for (iellipse.GoToBegin(), ierg.GoToBegin(); !iellipse.IsAtEnd() && !ierg.IsAtEnd(); ++iellipse, ++ierg) {
+          if (iellipse.Get() == 1) {
             ierg.Set(2048);
-            break;
           }
-          validVoxel++;
         }
       }
     }
