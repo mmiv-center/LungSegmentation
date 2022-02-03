@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
 
   region.SetSize(size);
   region.SetIndex(start);
-  imageA->SetRegions(region);
+  imageA->SetRegions(region); // assume default spacing of 1
   imageA->Allocate();
   imageB->SetRegions(region);
   imageB->Allocate();
@@ -356,6 +356,7 @@ int main(int argc, char *argv[]) {
       }
     }
     // add a lesion if we have to
+    // ./FakeLungVolumes -t 0.0001 -w 0.0001 -r 64x64x64 -l 7 /output/output.nii
     if (command.GetOptionWasSet("addLesion")) {
       int lesion_size = command.GetValueAsInt("addLesion", "addlesion");
       // size of the lesion should be in lesion_size
@@ -406,9 +407,12 @@ int main(int argc, char *argv[]) {
       }
 
       // pick a location for the lesion
+      // the location can be at the border of the volume
+      // in that case we don't see the whole lesion - do we care?
       unsigned int randomVoxel = rand() % validVoxel;
       ImageType::IndexType ellipse_center;
       // what is the x/y/z location here?
+      validVoxel = 0;
       for (iplaceForLesion.GoToBegin(); !iplaceForLesion.IsAtEnd(); ++iplaceForLesion) {
         if (iplaceForLesion.Get() == 1) {
           if (validVoxel == randomVoxel) {
@@ -417,6 +421,10 @@ int main(int argc, char *argv[]) {
           }
           validVoxel++;
         }
+      }
+      if (validVoxel == 0) {
+        fprintf(stderr, "ERROR: no valid voxel found for a lesion.\n");
+        return EXIT_FAILURE;
       }
 
       // create a random ellipsoid shape and orientation
@@ -439,9 +447,12 @@ int main(int argc, char *argv[]) {
 
         EllipseType::Pointer ellipse = EllipseType::New();
         EllipseType::ArrayType radiusArray;
-        radiusArray[0] = lesion_size;
-        radiusArray[1] = lesion_size / 2;
-        radiusArray[1] = lesion_size / 2;
+        // aspect ratio is 0.4...1
+        float aspect_ratio = 0.4 + (1 - 0.4) * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+        radiusArray[0] = 1.0 * (lesion_size / 2);
+        radiusArray[1] = aspect_ratio * (lesion_size / 2);
+        radiusArray[2] = aspect_ratio * (lesion_size / 2);
+
         // ellipse->SetRadiusInObjectSpace(  size[0] * 0.2 * spacing[0] );
         ellipse->SetRadiusInObjectSpace(radiusArray);
 
@@ -460,9 +471,13 @@ int main(int argc, char *argv[]) {
         const double angle = /*angleInDegrees*/ (rand() % 180) * degreesToRadians;
 
         TransformType::OutputVectorType axis;
-        axis[0] = 1; // todo: random axis
-        axis[1] = 0;
-        axis[2] = 0;
+        axis[0] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[1] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[2] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[0] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+        axis[1] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+        axis[2] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+
         transform->Rotate3D(axis, -angle, false);
 
         translation[0] = lesion_size / 2.0;
@@ -489,7 +504,7 @@ int main(int argc, char *argv[]) {
         IteratorType iellipse(ell, ell->GetLargestPossibleRegion());
         IteratorType ierg(erg, outputRegion);
         for (iellipse.GoToBegin(), ierg.GoToBegin(); !iellipse.IsAtEnd() && !ierg.IsAtEnd(); ++iellipse, ++ierg) {
-          if (iellipse.Get() == 1) {
+          if (iellipse.Get() > 0) {
             ierg.Set(2048);
           }
         }
