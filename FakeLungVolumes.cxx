@@ -596,6 +596,7 @@ int main(int argc, char *argv[]) {
         if (outputStart[2] + lesion_size > outputRegion.GetSize()[2]) {
           esize[2] = outputRegion.GetSize()[2] - outputStart[2] - 1;
         }
+        fprintf(stdout, "effective lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
 
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
