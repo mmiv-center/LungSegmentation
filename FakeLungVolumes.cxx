@@ -588,13 +588,13 @@ int main(int argc, char *argv[]) {
           outputStart[2] = 0;
         }
         if (outputStart[0] + lesion_size >= outputRegion.GetSize()[0]) {
-          esize[0] -= outputRegion.GetSize()[0] - (outputStart[0] + lesion_size);
+          esize[0] = outputRegion.GetSize()[0] - outputStart[0] - 1;
         }
         if (outputStart[1] + lesion_size > outputRegion.GetSize()[1]) {
-          esize[1] -= outputRegion.GetSize()[1] - (outputStart[1] + lesion_size);
+          esize[1] = outputRegion.GetSize()[1] - outputStart[1] - 1;
         }
         if (outputStart[2] + lesion_size > outputRegion.GetSize()[2]) {
-          esize[2] -= outputRegion.GetSize()[2] - (outputStart[2] + lesion_size);
+          esize[2] = outputRegion.GetSize()[2] - outputStart[2] - 1;
         }
 
         outputRegion.SetSize(esize);
