@@ -572,20 +572,27 @@ int main(int argc, char *argv[]) {
         imageFilter->Update();
         ImageType::Pointer ell = imageFilter->GetOutput();
 
-        ImageType::RegionType wholeRegion = erg->GetLargestPossibleRegion();
+        ImageType::RegionType wholeRegion = erg->GetLargestPossibleRegion();  // the whole volume
+        ImageType::RegionType sourceRegion = ell->GetLargestPossibleRegion(); // the smaller ellipse region
+
+        // the target region
         ImageType::RegionType outputRegion = ell->GetLargestPossibleRegion();
         ImageType::RegionType::IndexType outputStart;
         outputStart[0] = ellipse_center[0] - lesion_size / 2; // shift this region to the upper corner of the ellipse shape
         outputStart[1] = ellipse_center[1] - lesion_size / 2;
         outputStart[2] = ellipse_center[2] - lesion_size / 2;
         // make sure the region is inside the volume (negative coordinates are not allowed)
+        ImageType::RegionType::IndexType shiftVector; // remember the changes to the bounding box to make the ellipse fit into the volume
         if (outputStart[0] < 0) {
+          shiftVector[0] = -outputStart[0];
           outputStart[0] = 0;
         }
         if (outputStart[1] < 0) {
+          shiftVector[1] = -outputStart[1];
           outputStart[1] = 0;
         }
         if (outputStart[2] < 0) {
+          shiftVector[2] = -outputStart[2];
           outputStart[2] = 0;
         }
         if (outputStart[0] + lesion_size >= wholeRegion.GetSize()[0]) {
@@ -602,13 +609,19 @@ int main(int argc, char *argv[]) {
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
 
+        sourceRegion.SetSize(esize);
+        sourceRegion.SetIndex(shiftVector);
+
         float densityLesion = 2048.0f;
         if (outputDensitiesValues.size() == 7) {
           densityLesion = outputDensitiesValues[5];
         }
 
+        // TODO: we have to make the sourceRegion for the ellipse region smaller now as well.
+        // It has to match with the overlap in the region.
+
         // now we need a region iterator in the output volume for the ellipse
-        IteratorType iellipse(ell, ell->GetLargestPossibleRegion());
+        IteratorType iellipse(ell, sourceRegion);
         IteratorType ierg(erg, outputRegion);
         for (iellipse.GoToBegin(), ierg.GoToBegin(); !iellipse.IsAtEnd() && !ierg.IsAtEnd(); ++iellipse, ++ierg) {
           if (iellipse.Get() > 0) {
