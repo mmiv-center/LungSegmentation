@@ -163,8 +163,9 @@ int main(int argc, char *argv[]) {
   command.AddOptionField("additiveWhiteNoise", "additivewhitenoise", MetaCommand::STRING, false);
 
   command.SetOption("VoidSpaces", "w", false,
-                    "Create void spaces with a given distance away from the lines. Default is\nthat this option is not used. In the resulting volume 0 will be "
-                    "the gap space right next to each vessel (label 4095) with 1, 2, 3, 4 the values of voxel that are in void space.");
+                    "Create void spaces with a given distance away from the lines. Default is that this option is not used."
+                    "\n\tIn the resulting volume 0 will be the gap space right next to each vessel (label 4095) with 1, 2, 3, 4"
+                    "\n\tthe values of voxel that are in void space.");
   command.AddOptionField("VoidSpaces", "voidspaces", MetaCommand::FLOAT, false);
 
   command.SetOption("addLesion", "l", false, "Specify a lesion of a specific size (5). Requires the option VoidSpaces.");
@@ -279,7 +280,7 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "Error: densities should be a list of 7 values as in \"0 1 2 3 4 2048 4096\".\n");
       return 1;
     }
-    fprintf(stdout, "Output densities are: %s\n", densities.c_str());
+    fprintf(stdout, "output densities are: %s\n", densities.c_str());
     for (unsigned int i = 0; i < densitiesValues.size(); i++) {
       outputDensitiesValues.push_back(atoi(densitiesValues[i].c_str()));
     }
@@ -576,6 +577,17 @@ int main(int argc, char *argv[]) {
         outputStart[0] = ellipse_center[0] - lesion_size / 2; // shift this region to the upper corner of the ellipse shape
         outputStart[1] = ellipse_center[1] - lesion_size / 2;
         outputStart[2] = ellipse_center[2] - lesion_size / 2;
+        // make sure the region is inside the volume (negative coordinates are not allowed)
+        if (outputStart[0] < 0) {
+          outputStart[0] = 0;
+        }
+        if (outputStart[1] < 0) {
+          outputStart[1] = 0;
+        }
+        if (outputStart[2] < 0) {
+          outputStart[2] = 0;
+        }
+
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
 

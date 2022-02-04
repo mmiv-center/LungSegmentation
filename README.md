@@ -85,6 +85,7 @@ To visualize the vessel generation process additionally to the vessels a four-cl
 
 Here are all the options:
 ```
+Option outfile is required but not defined
  Command tags: 
    [ -r [ resolution ] ]
       = Specify the resolution of the volume to be generated (in pixel as in 64x64x64).
@@ -94,14 +95,24 @@ Here are all the options:
       = Specify the number of times the Gaussian kernels are applied (2).
    [ -t [ threshold ] ]
       = Specify the threshold for zero-crossing (0.0001).
+   [ -z [ zero ] ]
+      = Specify at what value the intersection should be calculated (0).
    [ -f [ finalsmooth ] ]
       = Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).
+   [ -n [ additivewhitenoise ] ]
+      = Add some noise with "mean variance" (0, 2). Additive white noise is appropriate for simulated CT images.
    [ -w [ voidspaces ] ]
-      = Create void spaces with a given distance away from the lines. Default is that this option is not used.
+      = Create void spaces with a given distance away from the lines. Default is that this option is not used. 
+        In the resulting volume 0 will be the gap space right next to each vessel (label 4095) with 1, 2, 3, 4
+        the values of voxel that are in void space.
+   [ -l [ addlesion ] ]
+      = Specify a lesion of a specific size (5). Requires the option VoidSpaces.
+   [ -d [ outputdensities ] ]
+      = Specify the output density values used for each segmentation ("0 1 2 3 4 2048 4096"). Requires the option VoidSpaces.
+   [ -m [ mask ] ]
+      = Specify a mask file (assumption is that the mask fits in resolution with the volume created).
    [ -s [ randomseed ] ]
       = Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.
-   [ -z [ zero ] ]
-      = Specify at what level the intersection should be performed (0).
    [ -f ]
       = Ignore existing files and force overwrite.
    [ -V ]
@@ -136,3 +147,19 @@ At lower resolution and in 2-D cross-section:
 As a final example here a closeup of a de novo in silico complex tissue.
 
 ![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setWithVoids.png)
+
+### Generating Lung Tissue with Lesions
+
+In order to generate training data several options have been added. We can create a label volume and a volume with more realistic densities - and noise.
+
+```
+./FakeLungVolumes -t 0.0001 -w 0.0001 -r 64x64x64 -l 9 -n "0 50" -d "-900 -900 -900 -900 -900 50 50" /output/output.nii
+```
+
+In the above example we have an ellipsoid lesion (l) of diameter 9 (pixel) with a random aspect ratio of (0.4..1) where the second and third axis are equal. We are adding noise at the very end with a standard deviation of 0 (and a mean of 0). And we code the different regions using density values such that (-d):
+
+ - Background intensity is set to -900
+ - The 4 void spaces are also set to a density of -900
+ - The lesion has a density of 50
+ - The vessels have a density of 50
+
