@@ -647,10 +647,11 @@ int main(int argc, char *argv[]) {
 
     IteratorType iter(result, result->GetLargestPossibleRegion());
     for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
-      if (iter.Get() > maxDensity)
+      if (iter.Get() > maxDensity) {
         iter.Set(maxDensity);
-      if (iter.Get() < minDensity)
+      } else if (iter.Get() < minDensity) {
         iter.Set(minDensity);
+      }
     }
   }
 
