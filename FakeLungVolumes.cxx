@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
-  command.SetOption("additiveWhiteNoise", "w", false,
+  command.SetOption("additiveWhiteNoise", "n", false,
                     "Add some noise with \"mean variance\" (0, 2). Additive white noise is appropriate for simulated CT images.");
   command.AddOptionField("additiveWhiteNoise", "additivewhitenoise", MetaCommand::STRING, false);
 
