@@ -139,13 +139,21 @@ int main(int argc, char *argv[]) {
   command.SetOption("finalSmooth", "f", false, "Specify the kernel size of a smoothing with a Gaussian at the end of the process (0).");
   command.AddOptionField("finalSmooth", "finalsmooth", MetaCommand::FLOAT, false);
 
+  command.SetOption("additiveWhiteNoise", "w", false,
+                    "Add some noise with \"mean variance\" (0, 2). Additive white noise is appropriate for simulated CT images.");
+  command.AddOptionField("additiveWhiteNoise", "additivewhitenoise", MetaCommand::STRING, false);
+
   command.SetOption("VoidSpaces", "w", false,
-                    "Create void spaces with a given distance away from the lines. Default is that this option is not used.\nIn the resulting volume 0 will be "
+                    "Create void spaces with a given distance away from the lines. Default is\nthat this option is not used. In the resulting volume 0 will be "
                     "the gap space right next to each vessel (label 4095) with 1, 2, 3, 4 the values of voxel that are in void space.");
   command.AddOptionField("VoidSpaces", "voidspaces", MetaCommand::FLOAT, false);
 
   command.SetOption("addLesion", "l", false, "Specify a lesion of a specific size (5). Requires the option VoidSpaces.");
   command.AddOptionField("addLesion", "addlesion", MetaCommand::INT, false);
+
+  command.SetOption("outputDensities", "d", false,
+                    "Specify the output density values used for each segmentation (\"0 1 2 3 4 2048 4096\"). Requires the option VoidSpaces.");
+  command.AddOptionField("outputDensities", "outputdensities", MetaCommand::STRING, false);
 
   command.SetOption("Mask", "m", false, "Specify a mask file (assumption is that the mask fits in resolution with the volume created).");
   command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
@@ -223,6 +231,41 @@ int main(int argc, char *argv[]) {
   std::string resolution = "64x64x64";
   if (command.GetOptionWasSet("Resolution")) {
     resolution = command.GetValueAsString("Resolution", "resolution");
+  }
+
+  bool addWhiteNoise = false;
+  std::vector<float> whiteNoiseMeanVariance;
+  if (command.GetOptionWasSet("additiveWhiteNoise")) {
+    addWhiteNoise = true;
+    std::string noise = command.GetValueAsString("additiveWhiteNoise", "additivewhitenoise");
+    std::vector<std::string> noiseValues;
+    StringToVector(noise, noiseValues);
+    if (noiseValues.size() != 2) {
+      fprintf(stderr, "Error: noise should be a pair of values (mean, variance).\n");
+      return 1;
+    }
+    float mean = atof(noiseValues[0].c_str());
+    float variance = atof(noiseValues[1].c_str());
+    fprintf(stdout, "Adding additive white noise with mean: %f and variance: %f\n", mean, variance);
+    whiteNoiseMeanVariance.push_back(mean);
+    whiteNoiseMeanVariance.push_back(variance);
+  }
+
+  bool outputDensities = false;
+  std::vector<int> outputDensitiesValues;
+  if (command.GetOptionWasSet("outputDensities")) {
+    outputDensities = true;
+    std::string densities = command.GetValueAsString("outputDensities", "outputdensities");
+    std::vector<std::string> densitiesValues;
+    StringToVector(densities, densitiesValues);
+    if (densitiesValues.size() != 5) {
+      fprintf(stderr, "Error: densities should be a list of 5 values as in \"0 1 2 3 4 2048 4096\".\n");
+      return 1;
+    }
+    fprintf(stdout, "Output densities are: %s\n", densities.c_str());
+    for (unsigned int i = 0; i < densitiesValues.size(); i++) {
+      outputDensitiesValues.push_back(atoi(densitiesValues[i].c_str()));
+    }
   }
 
   // store information in the result json file
