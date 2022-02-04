@@ -103,6 +103,24 @@ public:
   }
 };
 
+// split string into array of strings
+std::vector<std::string> split_string(std::string &str) {
+  std::vector<std::string> strings;
+  std::string delimiter = " ";
+
+  std::string::size_type pos = 0;
+  std::string::size_type prev = 0;
+  while ((pos = str.find(delimiter, prev)) != std::string::npos) {
+    strings.push_back(str.substr(prev, pos - prev));
+    prev = pos + 1;
+  }
+
+  // To get the last substring (or only, if delimiter is not found)
+  strings.push_back(str.substr(prev));
+
+  return strings;
+}
+
 json resultJSON;
 
 int main(int argc, char *argv[]) {
@@ -231,24 +249,6 @@ int main(int argc, char *argv[]) {
   std::string resolution = "64x64x64";
   if (command.GetOptionWasSet("Resolution")) {
     resolution = command.GetValueAsString("Resolution", "resolution");
-  }
-
-  // split string into array of strings
-  std::vector<std::string> split_string(std::string & str) {
-    std::vector<std::string> strings;
-    std::string delimiter = " ";
-
-    std::string::size_type pos = 0;
-    std::string::size_type prev = 0;
-    while ((pos = str.find(delimiter, prev)) != std::string::npos) {
-      strings.push_back(str.substr(prev, pos - prev));
-      prev = pos + 1;
-    }
-
-    // To get the last substring (or only, if delimiter is not found)
-    strings.push_back(str.substr(prev));
-
-    return strings;
   }
 
   bool addWhiteNoise = false;
