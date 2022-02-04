@@ -274,8 +274,8 @@ int main(int argc, char *argv[]) {
     outputDensities = true;
     std::string densities = command.GetValueAsString("outputDensities", "outputdensities");
     std::vector<std::string> densitiesValues = split_string(densities);
-    if (densitiesValues.size() != 5) {
-      fprintf(stderr, "Error: densities should be a list of 5 values as in \"0 1 2 3 4 2048 4096\".\n");
+    if (densitiesValues.size() != 7) {
+      fprintf(stderr, "Error: densities should be a list of 7 values as in \"0 1 2 3 4 2048 4096\".\n");
       return 1;
     }
     fprintf(stdout, "Output densities are: %s\n", densities.c_str());
