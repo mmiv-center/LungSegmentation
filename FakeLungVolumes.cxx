@@ -572,6 +572,7 @@ int main(int argc, char *argv[]) {
         imageFilter->Update();
         ImageType::Pointer ell = imageFilter->GetOutput();
 
+        ImageType::RegionType wholeRegion = erg->GetLargestPossibleRegion();
         ImageType::RegionType outputRegion = ell->GetLargestPossibleRegion();
         ImageType::RegionType::IndexType outputStart;
         outputStart[0] = ellipse_center[0] - lesion_size / 2; // shift this region to the upper corner of the ellipse shape
@@ -587,14 +588,14 @@ int main(int argc, char *argv[]) {
         if (outputStart[2] < 0) {
           outputStart[2] = 0;
         }
-        if (outputStart[0] + lesion_size >= outputRegion.GetSize()[0]) {
-          esize[0] = outputRegion.GetSize()[0] - outputStart[0] - 1;
+        if (outputStart[0] + lesion_size >= wholeRegion.GetSize()[0]) {
+          esize[0] = wholeRegion.GetSize()[0] - outputStart[0] - 1;
         }
         if (outputStart[1] + lesion_size > outputRegion.GetSize()[1]) {
-          esize[1] = outputRegion.GetSize()[1] - outputStart[1] - 1;
+          esize[1] = wholeRegion.GetSize()[1] - outputStart[1] - 1;
         }
-        if (outputStart[2] + lesion_size > outputRegion.GetSize()[2]) {
-          esize[2] = outputRegion.GetSize()[2] - outputStart[2] - 1;
+        if (outputStart[2] + lesion_size > wholeRegion.GetSize()[2]) {
+          esize[2] = wholeRegion.GetSize()[2] - outputStart[2] - 1;
         }
         fprintf(stdout, "effective lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
 
