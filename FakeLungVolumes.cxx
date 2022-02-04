@@ -580,7 +580,7 @@ int main(int argc, char *argv[]) {
 
         float densityLesion = 2048.0f;
         if (outputDensitiesValues.size() == 7) {
-          densityLesion = outputDensitiesValues[6];
+          densityLesion = outputDensitiesValues[5];
         }
 
         // now we need a region iterator in the output volume for the ellipse
