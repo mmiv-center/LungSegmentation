@@ -583,6 +583,9 @@ int main(int argc, char *argv[]) {
         outputStart[2] = ellipse_center[2] - lesion_size / 2;
         // make sure the region is inside the volume (negative coordinates are not allowed)
         ImageType::RegionType::IndexType shiftVector; // remember the changes to the bounding box to make the ellipse fit into the volume
+        shiftVector[0] = 0;
+        shiftVector[1] = 0;
+        shiftVector[2] = 0;
         if (outputStart[0] < 0) {
           shiftVector[0] = -outputStart[0] + 1;
           outputStart[0] = 0;
