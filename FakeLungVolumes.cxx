@@ -233,13 +233,30 @@ int main(int argc, char *argv[]) {
     resolution = command.GetValueAsString("Resolution", "resolution");
   }
 
+  // split string into array of strings
+  std::vector<std::string> split_string(std::string & str) {
+    std::vector<std::string> strings;
+    std::string delimiter = " ";
+
+    std::string::size_type pos = 0;
+    std::string::size_type prev = 0;
+    while ((pos = str.find(delimiter, prev)) != std::string::npos) {
+      strings.push_back(str.substr(prev, pos - prev));
+      prev = pos + 1;
+    }
+
+    // To get the last substring (or only, if delimiter is not found)
+    strings.push_back(str.substr(prev));
+
+    return strings;
+  }
+
   bool addWhiteNoise = false;
   std::vector<float> whiteNoiseMeanVariance;
   if (command.GetOptionWasSet("additiveWhiteNoise")) {
     addWhiteNoise = true;
     std::string noise = command.GetValueAsString("additiveWhiteNoise", "additivewhitenoise");
-    std::vector<std::string> noiseValues;
-    StringToVector(noise, noiseValues);
+    std::vector<std::string> noiseValues = split_string(noise);
     if (noiseValues.size() != 2) {
       fprintf(stderr, "Error: noise should be a pair of values (mean, variance).\n");
       return 1;
@@ -256,8 +273,7 @@ int main(int argc, char *argv[]) {
   if (command.GetOptionWasSet("outputDensities")) {
     outputDensities = true;
     std::string densities = command.GetValueAsString("outputDensities", "outputdensities");
-    std::vector<std::string> densitiesValues;
-    StringToVector(densities, densitiesValues);
+    std::vector<std::string> densitiesValues = split_string(densities);
     if (densitiesValues.size() != 5) {
       fprintf(stderr, "Error: densities should be a list of 5 values as in \"0 1 2 3 4 2048 4096\".\n");
       return 1;
