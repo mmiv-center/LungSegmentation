@@ -291,7 +291,7 @@ int main(int argc, char *argv[]) {
     resultJSON["command_line"].push_back(std::string(argv[i]));
   }
 
-  typedef unsigned short OutputPixelType;
+  typedef signed short OutputPixelType;
   typedef float FloatPixelType;
   const unsigned int Dimension = 3;
 
