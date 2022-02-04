@@ -68,6 +68,7 @@
 #include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
 #include <map>
+#include <random>
 
 #include <stdlib.h>
 #include <time.h>
@@ -251,10 +252,10 @@ int main(int argc, char *argv[]) {
     resolution = command.GetValueAsString("Resolution", "resolution");
   }
 
-  bool addWhiteNoise = false;
-  std::vector<float> whiteNoiseMeanVariance;
+  bool addNoise = false;
+  std::vector<float> noiseMeanVariance;
   if (command.GetOptionWasSet("additiveWhiteNoise")) {
-    addWhiteNoise = true;
+    addNoise = true;
     std::string noise = command.GetValueAsString("additiveWhiteNoise", "additivewhitenoise");
     std::vector<std::string> noiseValues = split_string(noise);
     if (noiseValues.size() != 2) {
@@ -263,9 +264,9 @@ int main(int argc, char *argv[]) {
     }
     float mean = atof(noiseValues[0].c_str());
     float variance = atof(noiseValues[1].c_str());
-    fprintf(stdout, "Adding additive white noise with mean: %f and variance: %f\n", mean, variance);
-    whiteNoiseMeanVariance.push_back(mean);
-    whiteNoiseMeanVariance.push_back(variance);
+    fprintf(stdout, "adding additive white noise with mean: %f and variance: %f\n", mean, variance);
+    noiseMeanVariance.push_back(mean);
+    noiseMeanVariance.push_back(variance);
   }
 
   bool outputDensities = false;
@@ -625,6 +626,16 @@ int main(int argc, char *argv[]) {
     for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
       if (iter.Get() > maxDensity || iter.Get() < minDensity)
         iter.Set(minDensity);
+    }
+  }
+
+  // additive noise as a last step
+  if (addNoise) {
+    std::default_random_engine generator;
+    std::normal_distribution<double> dist(noiseMeanVariance[0], noiseMeanVariance[1]);
+    IteratorType iter(result, result->GetLargestPossibleRegion());
+    for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
+      iter.Set(iter.Get() + dist(generator));
     }
   }
 
