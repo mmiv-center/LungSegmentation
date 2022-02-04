@@ -387,14 +387,33 @@ int main(int argc, char *argv[]) {
   erg->SetRegions(region);
   erg->Allocate();
 
+  float densityVessels = 4095.0f;
+  if (outputDensitiesValues.size() == 7) {
+    densityVessels = outputDensitiesValues[6];
+  }
+  float densityBackground = 0.0f;
+  if (outputDensitiesValues.size() == 7) {
+    densityBackground = outputDensitiesValues[0];
+  }
   IteratorType IteratorE(erg, erg->GetLargestPossibleRegion());
   IteratorType itA(tmpA, tmpA->GetLargestPossibleRegion());
   IteratorType itB(tmpB, tmpB->GetLargestPossibleRegion());
   for (IteratorE.GoToBegin(), itA.GoToBegin(), itB.GoToBegin(); !itA.IsAtEnd() && !itB.IsAtEnd() && !IteratorE.IsAtEnd(); ++itA, ++itB, ++IteratorE) {
     if ((itA.Get() < (zero + threshold) && (itA.Get() > (zero - threshold))) && (itB.Get() < (zero + threshold) && (itB.Get() > (zero - threshold))))
-      IteratorE.Set(4095.0);
+      IteratorE.Set(densityVessels);
     else
-      IteratorE.Set(0.0);
+      IteratorE.Set(densityBackground);
+  }
+
+  int type1 = 1;
+  int type2 = 2;
+  int type3 = 3;
+  int type4 = 4;
+  if (outputDensitiesValues.size() == 7) {
+    type1 = outputDensitiesValues[1];
+    type2 = outputDensitiesValues[2];
+    type3 = outputDensitiesValues[3];
+    type4 = outputDensitiesValues[4];
   }
 
   // if we want to have void spaces we can create them here
@@ -404,13 +423,13 @@ int main(int argc, char *argv[]) {
       if (fabs(itA.Get()) >= (threshold + voidSpaces) && fabs(itB.Get()) >= (threshold + voidSpaces)) {
         float testA = itA.Get();
         float testB = itB.Get();
-        int type = 1; // both are negative
+        int type = type1; // both are negative
         if (testA > 0 && testB > 0)
-          type = 2;
+          type = type2;
         else if (testA > 0 && testB < 0)
-          type = 3;
+          type = type3;
         else if (testA < 0 && testB > 0)
-          type = 4;
+          type = type4;
         IteratorE.Set(type);
       }
     }
@@ -433,7 +452,7 @@ int main(int argc, char *argv[]) {
       IteratorType ierg(erg, erg->GetLargestPossibleRegion());
       IteratorType iergVoidSpace(ergVoidSpace, ergVoidSpace->GetLargestPossibleRegion());
       for (ierg.GoToBegin(), iergVoidSpace.GoToBegin(); !iergVoidSpace.IsAtEnd() && !ierg.IsAtEnd(); ++ierg, ++iergVoidSpace) {
-        if (ierg.Get() == 1 || ierg.Get() == 2 || ierg.Get() == 3 || ierg.Get() == 4) {
+        if (ierg.Get() == type1 || ierg.Get() == type2 || ierg.Get() == type3 || ierg.Get() == type4) {
           iergVoidSpace.Set(1);
         } else {
           iergVoidSpace.Set(0);
@@ -559,12 +578,17 @@ int main(int argc, char *argv[]) {
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
 
+        float densityLesion = 2048.0f;
+        if (outputDensitiesValues.size() == 7) {
+          densityLesion = outputDensitiesValues[6];
+        }
+
         // now we need a region iterator in the output volume for the ellipse
         IteratorType iellipse(ell, ell->GetLargestPossibleRegion());
         IteratorType ierg(erg, outputRegion);
         for (iellipse.GoToBegin(), ierg.GoToBegin(); !iellipse.IsAtEnd() && !ierg.IsAtEnd(); ++iellipse, ++ierg) {
           if (iellipse.Get() > 0) {
-            ierg.Set(2048);
+            ierg.Set(densityLesion);
           }
         }
       }
@@ -582,10 +606,25 @@ int main(int argc, char *argv[]) {
     s->Update();
     result = s->GetOutput();
     // cleanup smoothing mess
+    float minDensity = 0.0f;
+    float maxDensity = 4068.0f;
+    if (outputDensitiesValues.size() == 7) {
+      minDensity = outputDensitiesValues[0];
+      maxDensity = outputDensitiesValues[1];
+      for (int i = 0; i < outputDensitiesValues.size(); i++) {
+        if (outputDensitiesValues[i] < minDensity) {
+          minDensity = outputDensitiesValues[i];
+        }
+        if (outputDensitiesValues[i] > maxDensity) {
+          maxDensity = outputDensitiesValues[i];
+        }
+      }
+    }
+
     IteratorType iter(result, result->GetLargestPossibleRegion());
     for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
-      if (iter.Get() > 4068 || iter.Get() < 0)
-        iter.Set(0);
+      if (iter.Get() > maxDensity || iter.Get() < minDensity)
+        iter.Set(minDensity);
     }
   }
 
