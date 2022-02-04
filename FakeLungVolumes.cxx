@@ -584,15 +584,15 @@ int main(int argc, char *argv[]) {
         // make sure the region is inside the volume (negative coordinates are not allowed)
         ImageType::RegionType::IndexType shiftVector; // remember the changes to the bounding box to make the ellipse fit into the volume
         if (outputStart[0] < 0) {
-          shiftVector[0] = -outputStart[0];
+          shiftVector[0] = -outputStart[0] + 1;
           outputStart[0] = 0;
         }
         if (outputStart[1] < 0) {
-          shiftVector[1] = -outputStart[1];
+          shiftVector[1] = -outputStart[1] + 1;
           outputStart[1] = 0;
         }
         if (outputStart[2] < 0) {
-          shiftVector[2] = -outputStart[2];
+          shiftVector[2] = -outputStart[2] + 1;
           outputStart[2] = 0;
         }
         if (outputStart[0] + lesion_size >= wholeRegion.GetSize()[0]) {
