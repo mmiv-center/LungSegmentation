@@ -11,10 +11,13 @@ After the initial step of extracting the intensities of the lungs and airways th
 ## Build
 
 This tool depends on itk and cmake. As a simple way to document (and build) the project file a Dockerfile is provided. It should be sufficient to build the docker container once
+
 ```
 docker build -t lungsegmentation -f Dockerfile .
 ```
+
 and to run it using
+
 ```
 > docker run --rm -it lungsegmentation
 Usage : ./LungSegmentation
@@ -48,16 +51,18 @@ Usage : ./LungSegmentation
    < outdir > 
       = Directory for output DICOM image series.
 ```
+
 In order to provide the data for processing the docker call should also include a '-v' to mount your data directory inside the docker container. Here an example call that assumes you have a 'data/folder_with_dicom' directory in your current directory. The following call will save the output in the same folder.
-```
+
+```bash
 docker run --rm -it -v `pwd`/data:/data lungsegmentation /data/folder_with_dicom /data/folder_with_dicom_segmented
 ```
-
 
 ### Debug build
 
 Adjust the CMakeLists.txt file with the path for your itk version.
-```
+
+```bash
 cmake -DCMAKE_BUILD_TYPE=Debug .
 make
 ```
@@ -69,22 +74,28 @@ The program FakeLungVolumes generates artificial vessel volumes. As those are ge
 The algorithm calculates the discrete intersection of two iso-surfaces from band-pass filtered white noise volumes. Based on the amount of band-pass filtering and the threshold for the iso-surface intersection detection blood-vessel like pattern appear.
 
 To generate a 64 by 64 by 64 volume:
-```
+
+```bash
 ./FakeLungVolumes /tmp/output.nii 
 ```
+
 To generate a higher resolution volume
-```
+
+```bash
 ./FakeLungVolumes -k 7 -t 0.0001 -f 1 -r 128x128x128 /tmp/output.nrrd
 ```
+
 The generated output is artificially restricted to 12bit simulating common detector resolution. The intensity range is 0 to 4096. This does not correspond to HU but may be sufficient to generate test data for machine learning algorithms. 
 
 To visualize the vessel generation process additionally to the vessels a four-class void space segmentation can be enabled. These void spaces are defined by the sign of the two band-pass filtered white noise volumes. Here an example:
-```
+
+```bash
 ./FakeLungVolumes -k 7 -t 0.0001 -w 0.0001 -f 1 -r 128x128x128 /tmp/output.nii
 ```
 
 Here are all the options:
-```
+
+```bash
 Option outfile is required but not defined
  Command tags: 
    [ -r [ resolution ] ]
@@ -122,6 +133,8 @@ Option outfile is required but not defined
       = Exported file name.
 ```
 
+In the above options the size of the vessel structures is defined by the size of the filter kernel (-k 7) and the number of iterations that the filter is applied to the white noise input (-i 2). 
+
 ![Fake vessel (gray) volume with 4 colored voids generated with ./FakeLungVolumes -k 7 -t 0.0001 -w 0.001 -r 128x128x128 /tmp/output.nii](https://github.com/mmiv-center/LungSegmentation/blob/master/img/FakeLungVoids.gif)
 
 
@@ -152,7 +165,7 @@ As a final example here a closeup of a de novo in silico complex tissue.
 
 In order to generate training data several options have been added. We can create a label volume and a volume with more realistic densities - and noise.
 
-```
+```bash
 ./FakeLungVolumes -t 0.0001 -w 0.0001 -r 64x64x64 -l 9 -n "0 50" -d "-900 -900 -900 -900 -900 50 50" /output/output.nii
 ```
 
@@ -163,3 +176,21 @@ In the above example we have an ellipsoid lesion (l) of diameter 9 (pixel) with 
  - The lesion has a density of 50
  - The vessels have a density of 50
 
+Given a specific seed for the random key (-s) we can generate an approximate density and a label volume with:
+
+```bash
+./FakeLungVolumes -i 2 -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "-900 -900 -900 -900 -900 50 50" -n "0 30" -f 0.5 /output/output.nii
+./FakeLungVolumes -i 2 -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "0 0 0 0 0 1 0" /output/label.nii
+```
+
+In the above label volume only the lesion (size 5) will have a label value of 1. Generating larger amounts of test data for deep learning can now be created with:
+
+```bash
+mkdir output;
+mkdir label;
+for i in `seq 1 10`; do 
+  case=`printf '%04d' $i`
+  ./FakeLungVolumes -i $i -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "-900 -900 -900 -900 -900 50 50" -n "0 30" -f 0.5 output/${case}.nii
+  ./FakeLungVolumes -i $i -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "0 0 0 0 0 1 0" label/${case}.nii
+done
+```
