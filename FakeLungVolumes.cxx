@@ -601,10 +601,10 @@ int main(int argc, char *argv[]) {
         if (outputStart[0] + lesion_size >= wholeRegion.GetSize()[0]) {
           esize[0] = wholeRegion.GetSize()[0] - outputStart[0];
         }
-        if (outputStart[1] + lesion_size > wholetRegion.GetSize()[1]) {
+        if (outputStart[1] + lesion_size >= wholeRegion.GetSize()[1]) {
           esize[1] = wholeRegion.GetSize()[1] - outputStart[1];
         }
-        if (outputStart[2] + lesion_size > wholeRegion.GetSize()[2]) {
+        if (outputStart[2] + lesion_size >= wholeRegion.GetSize()[2]) {
           esize[2] = wholeRegion.GetSize()[2] - outputStart[2];
         }
         fprintf(stdout, "shared lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
