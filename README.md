@@ -186,8 +186,8 @@ Given a specific seed for the random key (-s) we can generate an approximate den
 In the above label volume only the lesion (size 5) will have a label value of 1. Generating larger amounts of test data for deep learning can now be created with:
 
 ```bash
-mkdir output;
-mkdir label;
+mkdir output
+mkdir label
 for i in `seq 1 10`; do 
   case=`printf '%04d' $i`
   ./FakeLungVolumes -i $i -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "-900 -900 -900 -900 -900 50 50" -n "0 30" -f 0.5 output/${case}.nii
