@@ -204,7 +204,7 @@ int main(int argc, char *argv[]) {
 
   int iterations = 2;
   if (command.GetOptionWasSet("Iterations")) {
-    iterations = command.GetValueAsInt("Iterations", "iterations");
+    iterations = command.GetValueAsInt("SmoothingIterations", "iterations");
     fprintf(stdout, "iterations is now: %d\n", iterations);
   }
 
