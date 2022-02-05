@@ -578,9 +578,9 @@ int main(int argc, char *argv[]) {
         // the target region
         ImageType::RegionType outputRegion = ell->GetLargestPossibleRegion();
         ImageType::RegionType::IndexType outputStart;
-        outputStart[0] = ellipse_center[0] - lesion_size / 2; // shift this region to the upper corner of the ellipse shape
-        outputStart[1] = ellipse_center[1] - lesion_size / 2;
-        outputStart[2] = ellipse_center[2] - lesion_size / 2;
+        outputStart[0] = ellipse_center[0] - (lesion_size / 2); // shift this region to the upper corner of the ellipse shape
+        outputStart[1] = ellipse_center[1] - (lesion_size / 2);
+        outputStart[2] = ellipse_center[2] - (lesion_size / 2);
         // make sure the region is inside the volume (negative coordinates are not allowed)
         ImageType::RegionType::IndexType shiftVector; // remember the changes to the bounding box to make the ellipse fit into the volume
         shiftVector[0] = 0;
@@ -607,7 +607,9 @@ int main(int argc, char *argv[]) {
         if (outputStart[2] + lesion_size > wholeRegion.GetSize()[2]) {
           esize[2] = wholeRegion.GetSize()[2] - outputStart[2];
         }
-        fprintf(stdout, "effective lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
+        fprintf(stdout, "shared lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
+        fprintf(stdout, "outputStart: %ld %ld %ld\n", outputStart[0], outputStart[1], outputStart[2]);
+        fprintf(stdout, "shiftVector: %ld %ld %ld\n", shiftVector[0], shiftVector[1], shiftVector[2]);
 
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
