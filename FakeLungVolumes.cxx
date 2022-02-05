@@ -610,6 +610,7 @@ int main(int argc, char *argv[]) {
         fprintf(stdout, "shared lesion size: %ld %ld %ld\n", esize[0], esize[1], esize[2]);
         fprintf(stdout, "outputStart: %ld %ld %ld\n", outputStart[0], outputStart[1], outputStart[2]);
         fprintf(stdout, "shiftVector: %ld %ld %ld\n", shiftVector[0], shiftVector[1], shiftVector[2]);
+        fprintf(stdout, "wholeRegion: %ld %ld %ld\n", wholeRegion.GetSize()[0], wholeRegion.GetSize()[1], wholeRegion.GetSize()[2]);
 
         outputRegion.SetSize(esize);
         outputRegion.SetIndex(outputStart);
