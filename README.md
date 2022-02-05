@@ -157,43 +157,43 @@ At lower resolution and in 2-D cross-section:
 
 ![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setsNeverIntersecting.gif)
 
-As a final example here a closeup of a de novo in silico complex tissue.
+As a final example here a closeup of a de-novo in-silico complex tissue.
 
 ![3 sets of fake vessels in a cross-section.](https://github.com/mmiv-center/LungSegmentation/blob/master/img/3setWithVoids.png)
 
 ### Generating Lung Tissue with Lesions
 
-In order to generate training data several options have been added. We can create a label volume and a volume with more realistic densities - and noise.
+In order to generate training data several options have been added. We can create a label volume and a volume with more realistic densities - and noise (mean 0 and standard deviation 50).
 
 ```bash
 ./FakeLungVolumes -t 0.0001 -w 0.0001 -r 64x64x64 -l 9 -n "0 50" -d "-900 -900 -900 -900 -900 50 50" /output/output.nii
 ```
 
-In the above example we have an ellipsoid lesion (l) of diameter 9 (pixel) with a random aspect ratio of (0.4..1) where the second and third axis are equal. We are adding noise at the very end with a standard deviation of 0 (and a mean of 0). And we code the different regions using density values such that (-d):
+In the above example we have an ellipsoid lesion of diameter (l=) 9 (pixel) with a random aspect ratio of (0.4..1) where the second and third axis are equal. The lesion ellipsoid is by default rotated around a random axis. We are adding gaussian distributed noise as a last step with a standard deviation of 50 (and a mean of 0). And we code the different regions using density values such that (-d):
 
 - Background intensity is set to -900
 - The 4 void spaces are also set to a density of -900
 - The lesion has a density of 50
 - The vessels have a density of 50
 
-Given a specific seed for the random key (-s) we can generate an approximate density and a label volume with:
+Given a specific seed for the random key (-s) we generate an approximate density with some noise and a label volume with:
 
 ```bash
 ./FakeLungVolumes -i 2 -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "-900 -900 -900 -900 -900 50 50" -n "0 30" -f 0.5 /output/output.nii
 ./FakeLungVolumes -i 2 -k 5 -s 1 -t 0.0002 -w 0.0001 -r 64x64x64 -l 5 -d "0 0 0 0 0 1 0" /output/label.nii
 ```
 
-In the above label volume only the lesion (size 5) will have a label value of 1. Generating larger amounts of test data for deep learning can now be created with:
+In the above label volume only the lesion (size 5) will have a label value of 1. Generating larger amounts of test data for deep learning:
 
 ```bash
 mkdir /output
 mkdir /label
-for i in `seq 1 10`; do
-   # pick a random size for the lesion
+for i in `seq 0 100000`; do
+   # pick a random size for the lesion aspect ratio and rotation is always random
    sizes[0]=3; sizes[1]=5; sizes[2]=7; sizes[3]=9; idx=$(($RANDOM % 4)); rz=${sizes[$idx]};
    # generate filenames with leading zeros
    case=`printf '%04d' $i`
-   # write a fake-CT
+   # write a fake-CT with a random seed of i
    ./FakeLungVolumes -i 2 -k 5 -s $i -t 0.0002 -w 0.0001 -r 64x64x64 -l $rz -d "-900 -900 -900 -900 -900 50 50" -n "0 30" -f 0.5 /output/${case}.nii
    # write the corresponding label file (0 - background, 1 - lesion)
    ./FakeLungVolumes -i 2 -k 5 -s $i -t 0.0002 -w 0.0001 -r 64x64x64 -l $rz -d "0 0 0 0 0 1 0" /label/${case}.nii

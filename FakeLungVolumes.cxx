@@ -687,6 +687,11 @@ int main(int argc, char *argv[]) {
   // additive noise as a last step
   if (addNoise) {
     std::default_random_engine generator;
+    if (command.GetOptionWasSet("randomSeed")) {
+      generator.seed(randomSeed);
+    } else {
+      generator.seed(time(NULL));
+    }
     std::normal_distribution<double> dist(noiseMeanVariance[0], noiseMeanVariance[1]);
     IteratorType iter(result, result->GetLargestPossibleRegion());
     for (iter.GoToBegin(); !iter.IsAtEnd(); ++iter) {
