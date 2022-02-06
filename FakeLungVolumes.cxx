@@ -574,9 +574,9 @@ int main(int argc, char *argv[]) {
         const double angle = /*angleInDegrees*/ (rand() % 180) * degreesToRadians;
 
         TransformType::OutputVectorType axis;
-        axis[0] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
-        axis[1] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
-        axis[2] = 0.5 - static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[0] = -0.5 + static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[1] = -0.5 + static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
+        axis[2] = -0.5 + static_cast<float>(rand()) / static_cast<float>(RAND_MAX); // todo: random axis
         axis[0] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
         axis[1] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
         axis[2] /= std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
