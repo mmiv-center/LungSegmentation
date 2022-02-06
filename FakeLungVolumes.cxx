@@ -274,6 +274,8 @@ int main(int argc, char *argv[]) {
   std::vector<int> outputDensitiesValues;
   if (command.GetOptionWasSet("outputDensities")) {
     outputDensities = true;
+    fprintf(stdout, "Warning: output densities should be unique. Especially the  id's for the void spaces (1,2,3,4) should be unique to allow a lesion to be "
+                    "placed in them. If the densities are not unique a lesion might appear in any overlapping tissue.\n");
     std::string densities = command.GetValueAsString("outputDensities", "outputdensities");
     std::vector<std::string> densitiesValues = split_string(densities);
     if (densitiesValues.size() != 7) {
@@ -329,10 +331,11 @@ int main(int argc, char *argv[]) {
   // add this point we like to make our volume larger. We will smooth with the gaussian so we will
   // have a border area that is affected by the smoothing kernel, lets extend the volume and
   // save out later the inner region only.
-  size[0] += smoothingKernelSize;
-  size[1] += smoothingKernelSize;
-  size[2] += smoothingKernelSize;
-  fprintf(stdout, "reduce border effect by computing in: %lu %lu %lu voxel\n", size[0], size[1], size[2]);
+  int gapSpace = smoothingKernelSize * 2;
+  size[0] += gapSpace;
+  size[1] += gapSpace;
+  size[2] += gapSpace;
+  fprintf(stdout, "reduce border effect computing in: [%lu, %lu, %lu]\n", size[0], size[1], size[2]);
 
   ImageType::RegionType region;
 
@@ -429,12 +432,12 @@ int main(int argc, char *argv[]) {
 
   // create the output region (minus smoothing kernel size)
   ImageType::RegionType regionLesion = erg->GetLargestPossibleRegion();
-  regionLesion.SetSize(0, regionLesion.GetSize()[0] - smoothingKernelSize);
-  regionLesion.SetSize(1, regionLesion.GetSize()[1] - smoothingKernelSize);
-  regionLesion.SetSize(2, regionLesion.GetSize()[2] - smoothingKernelSize);
-  regionLesion.SetIndex(0, smoothingKernelSize / 2);
-  regionLesion.SetIndex(1, smoothingKernelSize / 2);
-  regionLesion.SetIndex(2, smoothingKernelSize / 2);
+  regionLesion.SetSize(0, regionLesion.GetSize()[0] - gapSpace);
+  regionLesion.SetSize(1, regionLesion.GetSize()[1] - gapSpace);
+  regionLesion.SetSize(2, regionLesion.GetSize()[2] - gapSpace);
+  regionLesion.SetIndex(0, gapSpace / 2);
+  regionLesion.SetIndex(1, gapSpace / 2);
+  regionLesion.SetIndex(2, gapSpace / 2);
 
   // if we want to have void spaces we can create them here
   if (command.GetOptionWasSet("VoidSpaces")) {
