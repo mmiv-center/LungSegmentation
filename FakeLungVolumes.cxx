@@ -325,6 +325,15 @@ int main(int argc, char *argv[]) {
   ImageType::SizeType size;
   sscanf(resolution.c_str(), "%lux%lux%lu", &(size[0]), &(size[1]), &(size[2]));
   fprintf(stdout, "generate volume with: %lu %lu %lu voxel\n", size[0], size[1], size[2]);
+
+  // add this point we like to make our volume larger. We will smooth with the gaussian so we will
+  // have a border area that is affected by the smoothing kernel, lets extend the volume and
+  // save out later the inner region only.
+  size[0] += smoothingKernelSize;
+  size[1] += smoothingKernelSize;
+  size[2] += smoothingKernelSize;
+  fprintf(stdout, "reduce border effect by computing in: %lu %lu %lu voxel\n", size[0], size[1], size[2]);
+
   ImageType::RegionType region;
 
   region.SetSize(size);
@@ -474,7 +483,17 @@ int main(int argc, char *argv[]) {
       ImageType::Pointer placeForLesion = binaryErode->GetOutput();
 
       // now we have to look for a random point in that volume (are there any voxel we can use?)
-      IteratorType iplaceForLesion(placeForLesion, placeForLesion->GetLargestPossibleRegion());
+      ImageType::RegionType regionLesion = placeForLesion->GetLargestPossibleRegion();
+      regionLesion.SetSize(0, regionLesion.GetSize()[0] - lesion_size);
+      regionLesion.SetSize(1, regionLesion.GetSize()[1] - lesion_size);
+      regionLesion.SetSize(2, regionLesion.GetSize()[2] - lesion_size);
+      regionLesion.SetIndex(0, lesion_size / 2);
+      regionLesion.SetIndex(1, lesion_size / 2);
+      regionLesion.SetIndex(2, lesion_size / 2);
+
+      IteratorType iplaceForLesion(placeForLesion, regionLesion);
+      // make  this area smaller
+
       int validVoxel = 0;
       for (iplaceForLesion.GoToBegin(); !iplaceForLesion.IsAtEnd(); ++iplaceForLesion) {
         if (iplaceForLesion.Get() == 1) {
@@ -494,6 +513,7 @@ int main(int argc, char *argv[]) {
       // what is the x/y/z location here?
       validVoxel = 0;
       for (iplaceForLesion.GoToBegin(); !iplaceForLesion.IsAtEnd(); ++iplaceForLesion) {
+
         if (iplaceForLesion.Get() == 1) {
           if (validVoxel == randomVoxel) {
             ellipse_center = iplaceForLesion.GetIndex();
