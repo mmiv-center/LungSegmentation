@@ -427,6 +427,15 @@ int main(int argc, char *argv[]) {
     type4 = outputDensitiesValues[4];
   }
 
+  // create the output region (minus smoothing kernel size)
+  ImageType::RegionType regionLesion = erg->GetLargestPossibleRegion();
+  regionLesion.SetSize(0, regionLesion.GetSize()[0] - smoothingKernelSize);
+  regionLesion.SetSize(1, regionLesion.GetSize()[1] - smoothingKernelSize);
+  regionLesion.SetSize(2, regionLesion.GetSize()[2] - smoothingKernelSize);
+  regionLesion.SetIndex(0, smoothingKernelSize / 2);
+  regionLesion.SetIndex(1, smoothingKernelSize / 2);
+  regionLesion.SetIndex(2, smoothingKernelSize / 2);
+
   // if we want to have void spaces we can create them here
   if (command.GetOptionWasSet("VoidSpaces")) {
     // use voidSpaces distance away and signs for placing void materials at intensity 1, 2, 3 and 4
@@ -481,15 +490,6 @@ int main(int argc, char *argv[]) {
       binaryErode->SetErodeValue(lesion_size); // size of the lesion
       binaryErode->Update();
       ImageType::Pointer placeForLesion = binaryErode->GetOutput();
-
-      // now we have to look for a random point in that volume (are there any voxel we can use?)
-      ImageType::RegionType regionLesion = placeForLesion->GetLargestPossibleRegion();
-      regionLesion.SetSize(0, regionLesion.GetSize()[0] - lesion_size);
-      regionLesion.SetSize(1, regionLesion.GetSize()[1] - lesion_size);
-      regionLesion.SetSize(2, regionLesion.GetSize()[2] - lesion_size);
-      regionLesion.SetIndex(0, lesion_size / 2);
-      regionLesion.SetIndex(1, lesion_size / 2);
-      regionLesion.SetIndex(2, lesion_size / 2);
 
       IteratorType iplaceForLesion(placeForLesion, regionLesion);
       // make  this area smaller
@@ -719,10 +719,19 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // when we write out the output we have to make the volume smaller - by the smoothingKernelSize
+  // to get the volume that the user asked for.
+  using ExtractFilterType = itk::ExtractImageFilter<ImageType, ImageType>;
+  auto extractFilter = ExtractFilterType::New();
+  extractFilter->SetDirectionCollapseToSubmatrix();
+  extractFilter->SetExtractionRegion(regionLesion);
+  extractFilter->SetInput(result);
+  extractFilter->Update();
+
   // cast to the output pixel type
   using OutputFilterType = itk::CastImageFilter<ImageType, OutputImageType>;
   OutputFilterType::Pointer filter = OutputFilterType::New();
-  filter->SetInput(result);
+  filter->SetInput(extractFilter->GetOutput());
 
   if (1) { // don't save this because its not with lungs separated
     typedef itk::ImageFileWriter<OutputImageType> WriterType;
