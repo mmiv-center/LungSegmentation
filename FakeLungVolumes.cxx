@@ -175,8 +175,12 @@ int main(int argc, char *argv[]) {
                     "Specify the output density values used for each segmentation (\"0 1 2 3 4 2048 4096\"). Requires the option VoidSpaces.");
   command.AddOptionField("outputDensities", "outputdensities", MetaCommand::STRING, false);
 
-  command.SetOption("Mask", "m", false, "Specify a mask file (assumption is that the mask fits in resolution with the volume created).");
-  command.AddOptionField("Mask", "mask", MetaCommand::STRING, false);
+  // export a mask volume as well
+  command.SetOption("MaskFile", "m", false, "Specify an output mask file.");
+  command.AddOptionField("MaskFile", "mask", MetaCommand::STRING, false);
+
+  command.SetOption("MaskFileLabels", "q", false, "Specify the labels used in the output mask (7 values as a string).");
+  command.AddOptionField("MaskFileLabels", "masklabels", MetaCommand::STRING, false);
 
   command.SetOption("randomSeed", "s", false,
                     "Specify the value used for initialization of the random numbers (time based). The same value should produce the same fields.");
@@ -214,12 +218,16 @@ int main(int argc, char *argv[]) {
     fprintf(stdout, "threshold is now: %f\n", threshold);
   }
 
-  std::string maskName = ""; // we should make sure that we have a way to specify what label to use in the mask as well
-  // we could use a <filename>,label1,label2,... way to specify options. Or another argument or list of arguments. For
-  // now just use all labels.
-  if (command.GetOptionWasSet("Mask")) {
-    maskName = command.GetValueAsString("Mask", "mask");
-    fprintf(stdout, "Mask volume requested: %s\n", maskName.c_str());
+  std::string maskName = "";
+  if (command.GetOptionWasSet("MaskFile")) {
+    maskName = command.GetValueAsString("MaskFile", "mask");
+    fprintf(stdout, "Mask volume should be saved here: %s\n", maskName.c_str());
+  }
+
+  std::string masklabels = "0 0 0 0 0 1 0"; // by default only export the lesion
+  if (command.GetOptionWasSet("MaskFileLabels")) {
+    masklabels = command.GetValueAsString("MaskFileLabels", "masklabels");
+    fprintf(stdout, "Mask label to save are: %s\n", masklabels.c_str());
   }
 
   float zero = 0;
@@ -667,6 +675,83 @@ int main(int argc, char *argv[]) {
             ierg.Set(densityLesion);
           }
         }
+      }
+    }
+  }
+
+  // before we blur or add noise we should save the lesion mask (same filename)
+  if (command.GetOptionWasSet("MaskFile")) {
+
+    using ExtractFilterType = itk::ExtractImageFilter<ImageType, ImageType>;
+    auto extractFilter = ExtractFilterType::New();
+    extractFilter->SetDirectionCollapseToSubmatrix();
+    extractFilter->SetExtractionRegion(regionLesion);
+    extractFilter->SetInput(erg);
+    extractFilter->Update();
+
+    // cast to the output pixel type
+    using OutputFilterType = itk::CastImageFilter<ImageType, OutputImageType>;
+    OutputFilterType::Pointer filter = OutputFilterType::New();
+    filter->SetInput(extractFilter->GetOutput());
+    filter->Update();
+    OutputImageType::Pointer maskErg = filter->GetOutput();
+
+    std::vector<int> outputMaskDensitiesValues;
+    std::vector<std::string> densitiesMaskValues = split_string(masklabels);
+    if (densitiesMaskValues.size() != 7) {
+      fprintf(stderr, "Error: mask labels should be a list of 7 values as in \"0 1 2 3 4 5 6\".\n");
+      return 1;
+    }
+    fprintf(stdout, "output mask densities are: %s\n", masklabels.c_str());
+    for (unsigned int i = 0; i < densitiesMaskValues.size(); i++) {
+      outputMaskDensitiesValues.push_back(atoi(densitiesMaskValues[i].c_str()));
+    }
+
+    using OutputIteratorType = itk::ImageRegionIterator<OutputImageType>;
+    OutputIteratorType IteratorE(maskErg, maskErg->GetLargestPossibleRegion());
+    // set the new lesion values in the mask output
+    for (IteratorE.GoToBegin(); !IteratorE.IsAtEnd(); ++IteratorE) {
+      float val = IteratorE.Get();
+      // the val values should be from outputDensitiesValues
+      int o = 0; // output label value
+      if (val == outputDensitiesValues[0])
+        o = outputMaskDensitiesValues[0];
+      else if (val == outputDensitiesValues[1])
+        o = outputMaskDensitiesValues[1];
+      else if (val == outputDensitiesValues[2])
+        o = outputMaskDensitiesValues[2];
+      else if (val == outputDensitiesValues[3])
+        o = outputMaskDensitiesValues[3];
+      else if (val == outputDensitiesValues[4])
+        o = outputMaskDensitiesValues[4];
+      else if (val == outputDensitiesValues[5])
+        o = outputMaskDensitiesValues[5];
+      else if (val == outputDensitiesValues[6])
+        o = outputMaskDensitiesValues[6];
+
+      IteratorE.Set(o);
+    }
+
+    if (1) { // don't save this because its not with lungs separated
+      typedef itk::ImageFileWriter<OutputImageType> WriterType;
+      WriterType::Pointer writer = WriterType::New();
+
+      std::string volFileName = maskName;
+      path p(volFileName);
+      create_directories(p.parent_path());
+
+      writer->SetFileName(volFileName);
+      writer->SetInput(maskErg); // not the right field
+
+      std::cout << "Writing the Fake Lung Mask " << std::endl << std::endl;
+      std::cout << volFileName << std::endl << std::endl;
+      resultJSON["output_mask"] = std::string(volFileName);
+
+      try {
+        writer->Update();
+      } catch (itk::ExceptionObject &ex) {
+        std::cout << ex << std::endl;
+        return EXIT_FAILURE;
       }
     }
   }
